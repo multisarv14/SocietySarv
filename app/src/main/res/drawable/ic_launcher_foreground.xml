@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Building Towers & Society Sarv Shield Graphics strictly within safe zone (21-87) -->
+    <!-- Left Tower -->
+    <path
+        android:fillColor="#B2DFDB"
+        android:pathData="M32,44 h14 v34 h-14 z" />
+    <!-- Left Tower Windows -->
+    <path
+        android:fillColor="#004D40"
+        android:pathData="M35,48 h3 v3 h-3 z M40,48 h3 v3 h-3 z M35,54 h3 v3 h-3 z M40,54 h3 v3 h-3 z M35,60 h3 v3 h-3 z M40,60 h3 v3 h-3 z M35,66 h3 v3 h-3 z M40,66 h3 v3 h-3 z" />
+
+    <!-- Center Main Tower -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46,32 h16 v46 h-16 z" />
+    <path
+        android:fillColor="#80CBC4"
+        android:pathData="M46,32 l8,-7 l8,7 z" />
+    <!-- Center Windows -->
+    <path
+        android:fillColor="#00695C"
+        android:pathData="M49,36 h4 v3 h-4 z M55,36 h4 v3 h-4 z M49,42 h4 v3 h-4 z M55,42 h4 v3 h-4 z M49,48 h4 v3 h-4 z M55,48 h4 v3 h-4 z M49,54 h4 v3 h-4 z M55,54 h4 v3 h-4 z M49,60 h4 v3 h-4 z M55,60 h4 v3 h-4 z" />
+
+    <!-- Right Tower -->
+    <path
+        android:fillColor="#E0F2F1"
+        android:pathData="M62,40 h14 v38 h-14 z" />
+    <!-- Right Windows -->
+    <path
+        android:fillColor="#004D40"
+        android:pathData="M65,44 h3 v3 h-3 z M70,44 h3 v3 h-3 z M65,50 h3 v3 h-3 z M70,50 h3 v3 h-3 z M65,56 h3 v3 h-3 z M70,56 h3 v3 h-3 z M65,62 h3 v3 h-3 z M70,62 h3 v3 h-3 z" />
+
+    <!-- Ground Baseline -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M26,78 h56 v3 h-56 z" />
+
+    <!-- Security & Trust Badge Circle in front -->
+    <path
+        android:fillColor="#FFD54F"
+        android:pathData="M54,64 m-9,0 a9,9 0 1,0 18,0 a9,9 0 1,0 -18,0" />
+    <path
+        android:fillColor="#004D40"
+        android:pathData="M50.5,61.5 h7 v1.6 h-4.2 l2.8,2.2 c-0.6,1.4 -1.8,2.2 -3.6,2.2 h-2 v-1.4 h2 c1,0 1.7,-0.4 2,-1.2 h-4 v-1.4 h4.2 c-0.2,-0.4 -0.6,-0.6 -1.2,-0.6 h-3 z" />
+</vector>

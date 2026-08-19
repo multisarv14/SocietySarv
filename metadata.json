@@ -1,0 +1,6 @@
+{
+  "name": "SocietySarv",
+  "description": "Comprehensive Housing Society Management & Accounting App with multi-role access, Marathi & English dual-language, financial balance sheets, maintenance billing, gate security, and resident helpdesk.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

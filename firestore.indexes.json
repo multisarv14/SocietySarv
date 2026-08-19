@@ -1,0 +1,145 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "residents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "wing", "order": "ASCENDING" },
+        { "fieldPath": "flatNumber", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "residents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "role", "order": "ASCENDING" },
+        { "fieldPath": "flatNumber", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "maintenance_bills",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "flatNumber", "order": "ASCENDING" },
+        { "fieldPath": "id", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "maintenance_bills",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "id", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "maintenance_bills",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "billMonth", "order": "ASCENDING" },
+        { "fieldPath": "flatNumber", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "expense_records",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "category", "order": "ASCENDING" },
+        { "fieldPath": "id", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "non_fee_revenues",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sourceCategory", "order": "ASCENDING" },
+        { "fieldPath": "id", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "visitor_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "id", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "visitor_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "flatNumber", "order": "ASCENDING" },
+        { "fieldPath": "id", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isPinned", "order": "DESCENDING" },
+        { "fieldPath": "id", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "category", "order": "ASCENDING" },
+        { "fieldPath": "id", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "complaints",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "flatNumber", "order": "ASCENDING" },
+        { "fieldPath": "id", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "complaints",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "id", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "residents",
+      "fieldPath": "photoBase64",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "society_info",
+      "fieldPath": "logoBase64",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "visitor_logs",
+      "fieldPath": "photoBase64",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "notices",
+      "fieldPath": "imageBase64",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "complaints",
+      "fieldPath": "attachmentBase64",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "expense_records",
+      "fieldPath": "billImageBase64",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "maintenance_bills",
+      "fieldPath": "receiptImageBase64",
+      "indexes": []
+    }
+  ]
+}

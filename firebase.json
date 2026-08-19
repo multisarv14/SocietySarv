@@ -1,0 +1,12 @@
+{
+  "firestore": [
+    {
+      "database": "societysarv-app-db",
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json",
+      "predeploy": [
+        "bash \"$RESOURCE_DIR/scripts/check-anonymous-auth.sh\" \"$RESOURCE_DIR/firestore.rules\""
+      ]
+    }
+  ]
+}

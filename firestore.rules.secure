@@ -1,0 +1,136 @@
+rules_version = '2';
+
+// SocietySarv - Cloud Firestore Security Rules
+// Database: societysarv-app-db (project: multisarv-mobileapps)
+//
+// NOTE ON AUTH:
+//   The app calls Firebase Anonymous Auth on startup. Once the Anonymous
+//   provider is switched on in
+//   Firebase Console > Authentication > Sign-in method > Anonymous,
+//   deploy `firestore.rules.secure` (see README-FIREBASE.md) so every request
+//   must carry an authenticated identity. Until then these rules stay open so
+//   that the app keeps working.
+//
+// Writes are split into create/update (payload is validated) and delete
+// (`request.resource` is null on a delete, so it must not be inspected there).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function allowed() {
+      return request.auth != null; // Anonymous Auth (or any Firebase Auth identity) required
+    }
+
+    function has(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // ---- Society master configuration (single doc: "main") --------------
+    match /society_info/{docId} {
+      allow read: if allowed();
+      allow create, update: if allowed()
+        && request.resource.data.name is string
+        && request.resource.data.societyCode is string
+        && request.resource.data.currentBalanceCash is number
+        && request.resource.data.currentBalanceBank is number;
+      // Deleting the config resets the install back to "no society registered",
+      // which is what the registration wizard checks for. Update is already
+      // allowed, so blocking delete here bought no real protection.
+      allow delete: if allowed();
+    }
+
+    // ---- Members / flats (docId = flatNumber, e.g. "A-101") -------------
+    match /residents/{flatNumber} {
+      allow read: if allowed();
+      allow create, update: if allowed()
+        && has(['flatNumber', 'ownerName', 'pin', 'role'])
+        && request.resource.data.flatNumber is string
+        && request.resource.data.ownerName is string
+        && request.resource.data.pin is string;
+      allow delete: if allowed();
+    }
+
+    // ---- Monthly maintenance bills & receipts ---------------------------
+    match /maintenance_bills/{billId} {
+      allow read: if allowed();
+      allow create, update: if allowed()
+        && has(['flatNumber', 'totalAmount', 'status'])
+        && request.resource.data.flatNumber is string
+        && request.resource.data.totalAmount is number
+        && request.resource.data.amountPaid is number;
+      allow delete: if allowed();
+    }
+
+    // ---- Operating expenses ---------------------------------------------
+    match /expense_records/{expenseId} {
+      allow read: if allowed();
+      allow create, update: if allowed()
+        && has(['title', 'amount', 'category'])
+        && request.resource.data.title is string
+        && request.resource.data.amount is number;
+      allow delete: if allowed();
+    }
+
+    // ---- Non-fee revenue (clubhouse, tower rent, parking, fines) --------
+    match /non_fee_revenues/{revenueId} {
+      allow read: if allowed();
+      allow create, update: if allowed()
+        && has(['title', 'amount', 'sourceCategory'])
+        && request.resource.data.title is string
+        && request.resource.data.amount is number;
+      allow delete: if allowed();
+    }
+
+    // ---- Gate security visitor log --------------------------------------
+    match /visitor_logs/{visitorId} {
+      allow read: if allowed();
+      allow create, update: if allowed()
+        && has(['visitorName', 'flatNumber', 'status'])
+        && request.resource.data.visitorName is string
+        && request.resource.data.flatNumber is string;
+      allow delete: if allowed();
+    }
+
+    // ---- Notice board ----------------------------------------------------
+    match /notices/{noticeId} {
+      allow read: if allowed();
+      allow create, update: if allowed()
+        && has(['title', 'content'])
+        && request.resource.data.title is string
+        && request.resource.data.content is string;
+      allow delete: if allowed();
+    }
+
+    // ---- Helpdesk complaints / tickets -----------------------------------
+    match /complaints/{complaintId} {
+      allow read: if allowed();
+      allow create, update: if allowed()
+        && has(['flatNumber', 'description', 'status'])
+        && request.resource.data.flatNumber is string
+        && request.resource.data.description is string;
+      allow delete: if allowed();
+    }
+
+    // ---- Emergency contact directory -------------------------------------
+    match /emergency_contacts/{contactId} {
+      allow read: if allowed();
+      allow create, update: if allowed()
+        && has(['name', 'phoneNumber'])
+        && request.resource.data.name is string
+        && request.resource.data.phoneNumber is string;
+      allow delete: if allowed();
+    }
+
+    // ---- Auto-increment counters for the numeric ids the UI sorts on ------
+    match /counters/{counterId} {
+      allow read: if allowed();
+      allow create, update: if allowed() && request.resource.data.value is int;
+      allow delete: if false;
+    }
+
+    // ---- Everything else is denied ---------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
