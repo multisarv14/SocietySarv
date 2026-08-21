@@ -71,9 +71,23 @@ object FirebaseModule {
     }
 }
 
-/** Firestore collection names - these mirror the old Room table names 1:1. */
+/**
+ * Firestore layout.
+ *
+ * Every society is its own document under [SOCIETIES], keyed by its login code,
+ * and all of that society's data lives in subcollections beneath it:
+ *
+ *     societies/{SOCIETYCODE}/residents/{flatNumber}
+ *     societies/{SOCIETYCODE}/maintenance_bills/{id}
+ *     societies/{SOCIETYCODE}/notices/{id}
+ *     ... and so on, including counters/
+ *
+ * Nothing is shared between societies, so two societies can hold the same flat
+ * number, the same bill month, or the same member PIN without colliding, and a
+ * query can never accidentally read another society's records.
+ */
 object Collections {
-    const val SOCIETY_INFO = "society_info"
+    const val SOCIETIES = "societies"
     const val RESIDENTS = "residents"
     const val MAINTENANCE_BILLS = "maintenance_bills"
     const val EXPENSE_RECORDS = "expense_records"
@@ -83,7 +97,4 @@ object Collections {
     const val COMPLAINTS = "complaints"
     const val EMERGENCY_CONTACTS = "emergency_contacts"
     const val COUNTERS = "counters"
-
-    /** The society master configuration lives in a single well-known document. */
-    const val SOCIETY_DOC = "main"
 }

@@ -74,7 +74,7 @@ fun DocumentSnapshot.toSocietyInfo(): SocietyInfo = SocietyInfo(
 )
 
 fun SocietyInfo.toMap(): Map<String, Any?> = mapOf(
-    "docId" to Collections.SOCIETY_DOC,
+    "docId" to societyCode,
     "id" to id,
     "name" to name,
     "registrationNumber" to registrationNumber,

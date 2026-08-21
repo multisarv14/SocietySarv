@@ -26,29 +26,67 @@ import com.example.data.firebase.toNotice
 import com.example.data.firebase.toResident
 import com.example.data.firebase.toSocietyInfo
 import com.example.data.firebase.toVisitorLog
+import com.google.firebase.firestore.CollectionReference
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.tasks.await
 
 /**
- * Every read and write in SocietySarv goes through Cloud Firestore.
+ * All reads and writes for **one society at a time**.
  *
- * Lists are exposed as [Flow]s backed by realtime snapshot listeners, so any
- * change made from another device (or straight from the Firebase console) shows
- * up in the app without a refresh.
+ * The society is chosen at login or registration via [setActiveSociety], and
+ * every query below is rooted at `societies/{code}`. Because each society owns
+ * its own subcollections, no query can reach another society's data even if a
+ * filter were forgotten.
+ *
+ * Lists are realtime snapshot listeners, so a change made from another device
+ * or from the Firebase console shows up without a refresh. Switching society
+ * tears the old listeners down and starts fresh ones.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class SocietyRepository(context: Context) {
 
     private val db: FirebaseFirestore = FirebaseModule.firestore(context)
 
-    private fun collection(name: String) = db.collection(name)
+    private val _activeSocietyCode = MutableStateFlow<String?>(null)
 
-    /** Turns a Firestore query into a realtime [Flow] of mapped entities. */
+    /** Login code of the society currently signed in, or null when signed out. */
+    val activeSocietyCode: StateFlow<String?> = _activeSocietyCode.asStateFlow()
+
+    fun setActiveSociety(code: String) {
+        _activeSocietyCode.value = normalise(code)
+    }
+
+    fun clearActiveSociety() {
+        _activeSocietyCode.value = null
+    }
+
+    private fun normalise(code: String) = code.trim().uppercase()
+
+    private fun societyDoc(code: String): DocumentReference =
+        db.collection(Collections.SOCIETIES).document(normalise(code))
+
+    private fun sub(code: String, name: String): CollectionReference =
+        societyDoc(code).collection(name)
+
+    /** Subcollection of the society that is currently signed in. */
+    private fun active(name: String): CollectionReference? =
+        _activeSocietyCode.value?.let { sub(it, name) }
+
+    // ------------------------------------------------------------- plumbing
+
     private fun <T> Query.asFlow(mapper: (DocumentSnapshot) -> T): Flow<List<T>> = callbackFlow {
         val registration = addSnapshotListener { snapshot, error ->
             if (error != null) {
@@ -63,233 +101,261 @@ class SocietyRepository(context: Context) {
         awaitClose { registration.remove() }
     }
 
-    // ------------------------------------------------------------- streams
-
-    val societyInfo: Flow<SocietyInfo?> = callbackFlow {
-        val registration = collection(Collections.SOCIETY_INFO)
-            .document(Collections.SOCIETY_DOC)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.e(TAG, "society listen failed", error)
-                    trySend(null)
-                    return@addSnapshotListener
-                }
-                trySend(if (snapshot != null && snapshot.exists()) snapshot.toSocietyInfo() else null)
-            }
-        awaitClose { registration.remove() }
+    /**
+     * Rebuilds a stream whenever the active society changes, and emits an empty
+     * list while signed out so a previous society's rows can never linger.
+     */
+    private fun <T> scoped(
+        name: String,
+        mapper: (DocumentSnapshot) -> T,
+        query: (CollectionReference) -> Query,
+    ): Flow<List<T>> = _activeSocietyCode.flatMapLatest { code ->
+        if (code == null) flowOf(emptyList()) else query(sub(code, name)).asFlow(mapper)
     }
 
-    val allResidents: Flow<List<Resident>> = collection(Collections.RESIDENTS)
-        .orderBy("wing", Query.Direction.ASCENDING)
-        .orderBy("flatNumber", Query.Direction.ASCENDING)
-        .asFlow { it.toResident() }
+    // ------------------------------------------------------------- streams
 
-    val allBills: Flow<List<MaintenanceBill>> = collection(Collections.MAINTENANCE_BILLS)
-        .orderBy("id", Query.Direction.DESCENDING)
-        .asFlow { it.toMaintenanceBill() }
+    val societyInfo: Flow<SocietyInfo?> = _activeSocietyCode.flatMapLatest { code ->
+        if (code == null) {
+            flowOf(null)
+        } else {
+            callbackFlow {
+                val registration = societyDoc(code).addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.e(TAG, "society listen failed", error)
+                        trySend(null)
+                        return@addSnapshotListener
+                    }
+                    trySend(if (snapshot != null && snapshot.exists()) snapshot.toSocietyInfo() else null)
+                }
+                awaitClose { registration.remove() }
+            }
+        }
+    }
 
-    val allExpenses: Flow<List<ExpenseRecord>> = collection(Collections.EXPENSE_RECORDS)
-        .orderBy("id", Query.Direction.DESCENDING)
-        .asFlow { it.toExpenseRecord() }
+    val allResidents: Flow<List<Resident>> = scoped(Collections.RESIDENTS, { it.toResident() }) {
+        it.orderBy("wing", Query.Direction.ASCENDING)
+            .orderBy("flatNumber", Query.Direction.ASCENDING)
+    }
 
-    val allRevenues: Flow<List<NonFeeRevenue>> = collection(Collections.NON_FEE_REVENUES)
-        .orderBy("id", Query.Direction.DESCENDING)
-        .asFlow { it.toNonFeeRevenue() }
+    val allBills: Flow<List<MaintenanceBill>> =
+        scoped(Collections.MAINTENANCE_BILLS, { it.toMaintenanceBill() }) {
+            it.orderBy("id", Query.Direction.DESCENDING)
+        }
 
-    val allVisitors: Flow<List<VisitorLog>> = collection(Collections.VISITOR_LOGS)
-        .orderBy("id", Query.Direction.DESCENDING)
-        .asFlow { it.toVisitorLog() }
+    val allExpenses: Flow<List<ExpenseRecord>> =
+        scoped(Collections.EXPENSE_RECORDS, { it.toExpenseRecord() }) {
+            it.orderBy("id", Query.Direction.DESCENDING)
+        }
 
-    val activeVisitors: Flow<List<VisitorLog>> = collection(Collections.VISITOR_LOGS)
-        .whereEqualTo("status", VisitorStatus.INSIDE.name)
-        .orderBy("id", Query.Direction.DESCENDING)
-        .asFlow { it.toVisitorLog() }
+    val allRevenues: Flow<List<NonFeeRevenue>> =
+        scoped(Collections.NON_FEE_REVENUES, { it.toNonFeeRevenue() }) {
+            it.orderBy("id", Query.Direction.DESCENDING)
+        }
 
-    val allNotices: Flow<List<Notice>> = collection(Collections.NOTICES)
-        .orderBy("isPinned", Query.Direction.DESCENDING)
-        .orderBy("id", Query.Direction.DESCENDING)
-        .asFlow { it.toNotice() }
+    val allVisitors: Flow<List<VisitorLog>> =
+        scoped(Collections.VISITOR_LOGS, { it.toVisitorLog() }) {
+            it.orderBy("id", Query.Direction.DESCENDING)
+        }
 
-    val allComplaints: Flow<List<Complaint>> = collection(Collections.COMPLAINTS)
-        .orderBy("id", Query.Direction.DESCENDING)
-        .asFlow { it.toComplaint() }
+    val activeVisitors: Flow<List<VisitorLog>> =
+        scoped(Collections.VISITOR_LOGS, { it.toVisitorLog() }) {
+            it.whereEqualTo("status", VisitorStatus.INSIDE.name)
+                .orderBy("id", Query.Direction.DESCENDING)
+        }
 
-    val emergencyContacts: Flow<List<EmergencyContact>> = collection(Collections.EMERGENCY_CONTACTS)
-        .orderBy("id", Query.Direction.ASCENDING)
-        .asFlow { it.toEmergencyContact() }
+    val allNotices: Flow<List<Notice>> = scoped(Collections.NOTICES, { it.toNotice() }) {
+        it.orderBy("isPinned", Query.Direction.DESCENDING)
+            .orderBy("id", Query.Direction.DESCENDING)
+    }
+
+    val allComplaints: Flow<List<Complaint>> = scoped(Collections.COMPLAINTS, { it.toComplaint() }) {
+        it.orderBy("id", Query.Direction.DESCENDING)
+    }
+
+    val emergencyContacts: Flow<List<EmergencyContact>> =
+        scoped(Collections.EMERGENCY_CONTACTS, { it.toEmergencyContact() }) {
+            it.orderBy("id", Query.Direction.ASCENDING)
+        }
 
     fun getBillsForFlat(flatNumber: String): Flow<List<MaintenanceBill>> =
-        collection(Collections.MAINTENANCE_BILLS)
-            .whereEqualTo("flatNumber", flatNumber)
-            .orderBy("id", Query.Direction.DESCENDING)
-            .asFlow { it.toMaintenanceBill() }
+        scoped(Collections.MAINTENANCE_BILLS, { it.toMaintenanceBill() }) {
+            it.whereEqualTo("flatNumber", flatNumber)
+                .orderBy("id", Query.Direction.DESCENDING)
+        }
 
     fun getVisitorsForFlat(flatNumber: String): Flow<List<VisitorLog>> =
-        collection(Collections.VISITOR_LOGS)
-            .whereEqualTo("flatNumber", flatNumber)
-            .orderBy("id", Query.Direction.DESCENDING)
-            .asFlow { it.toVisitorLog() }
+        scoped(Collections.VISITOR_LOGS, { it.toVisitorLog() }) {
+            it.whereEqualTo("flatNumber", flatNumber)
+                .orderBy("id", Query.Direction.DESCENDING)
+        }
 
     fun getComplaintsForFlat(flatNumber: String): Flow<List<Complaint>> =
-        collection(Collections.COMPLAINTS)
-            .whereEqualTo("flatNumber", flatNumber)
-            .orderBy("id", Query.Direction.DESCENDING)
-            .asFlow { it.toComplaint() }
+        scoped(Collections.COMPLAINTS, { it.toComplaint() }) {
+            it.whereEqualTo("flatNumber", flatNumber)
+                .orderBy("id", Query.Direction.DESCENDING)
+        }
+
+    // ------------------------------------------------------- society lookup
+
+    /** Looks a society up by its login code. Used by login and registration. */
+    suspend fun findSocietyByCode(code: String): SocietyInfo? = runCatching {
+        societyDoc(code).get().await().takeIf { it.exists() }?.toSocietyInfo()
+    }.onFailure { Log.e(TAG, "findSocietyByCode failed", it) }.getOrNull()
+
+    suspend fun getSocietyInfoSync(): SocietyInfo? {
+        val code = _activeSocietyCode.value ?: return null
+        return findSocietyByCode(code)
+    }
 
     // ----------------------------------------------------- one-shot lookups
 
-    suspend fun getSocietyInfoSync(): SocietyInfo? = runCatching {
-        collection(Collections.SOCIETY_INFO)
-            .document(Collections.SOCIETY_DOC)
-            .get()
-            .await()
-            .takeIf { it.exists() }
-            ?.toSocietyInfo()
-    }.onFailure { Log.e(TAG, "getSocietyInfoSync failed", it) }.getOrNull()
-
     suspend fun getAllResidentsSync(): List<Resident> = runCatching {
-        collection(Collections.RESIDENTS)
-            .orderBy("wing", Query.Direction.ASCENDING)
+        val residents = active(Collections.RESIDENTS) ?: return emptyList()
+        residents.orderBy("wing", Query.Direction.ASCENDING)
             .orderBy("flatNumber", Query.Direction.ASCENDING)
-            .get()
-            .await()
-            .documents
-            .map { it.toResident() }
+            .get().await().documents.map { it.toResident() }
     }.onFailure { Log.e(TAG, "getAllResidentsSync failed", it) }.getOrDefault(emptyList())
 
-    /** Login lookup by flat: the flat number *is* the document id. */
-    suspend fun getResidentByFlat(flatNumber: String): Resident? = runCatching {
-        val direct = collection(Collections.RESIDENTS).document(flatNumber).get().await()
-        if (direct.exists()) return@runCatching direct.toResident()
+    /** Flat lookup inside one society. The flat number is the document id. */
+    suspend fun getResidentByFlat(flatNumber: String, societyCode: String? = null): Resident? =
+        runCatching {
+            val code = societyCode ?: _activeSocietyCode.value ?: return null
+            val flats = sub(code, Collections.RESIDENTS)
+            val wanted = flatNumber.trim()
 
-        // Fall back to a field query so that a case difference or a hand-created
-        // document with an auto-id still resolves.
-        collection(Collections.RESIDENTS)
-            .whereEqualTo("flatNumber", flatNumber)
-            .limit(1)
-            .get()
-            .await()
-            .documents
-            .firstOrNull()
-            ?.toResident()
-            ?: collection(Collections.RESIDENTS).get().await().documents
-                .firstOrNull { it.getString("flatNumber").equals(flatNumber, ignoreCase = true) }
-                ?.toResident()
-    }.onFailure { Log.e(TAG, "getResidentByFlat failed", it) }.getOrNull()
+            val direct = flats.document(wanted.uppercase()).get().await()
+            if (direct.exists()) return@runCatching direct.toResident()
 
-    /** Login lookup by registered mobile number. */
-    suspend fun getResidentByMobile(mobile: String): Resident? = runCatching {
-        collection(Collections.RESIDENTS)
-            .whereEqualTo("contactNumber", mobile)
-            .limit(1)
-            .get()
-            .await()
-            .documents
-            .firstOrNull()
-            ?.toResident()
-    }.onFailure { Log.e(TAG, "getResidentByMobile failed", it) }.getOrNull()
+            flats.whereEqualTo("flatNumber", wanted).limit(1).get().await()
+                .documents.firstOrNull()?.toResident()
+                ?: flats.get().await().documents
+                    .firstOrNull { it.getString("flatNumber").equals(wanted, ignoreCase = true) }
+                    ?.toResident()
+        }.onFailure { Log.e(TAG, "getResidentByFlat failed", it) }.getOrNull()
+
+    /** Mobile-number lookup inside one society. */
+    suspend fun getResidentByMobile(mobile: String, societyCode: String? = null): Resident? =
+        runCatching {
+            val code = societyCode ?: _activeSocietyCode.value ?: return null
+            sub(code, Collections.RESIDENTS)
+                .whereEqualTo("contactNumber", mobile.trim()).limit(1).get().await()
+                .documents.firstOrNull()?.toResident()
+        }.onFailure { Log.e(TAG, "getResidentByMobile failed", it) }.getOrNull()
 
     // ------------------------------------------------------------- society
 
+    /** Creates or updates a society document, keyed by its login code. */
     suspend fun insertOrUpdateSociety(society: SocietyInfo) {
-        collection(Collections.SOCIETY_INFO)
-            .document(Collections.SOCIETY_DOC)
-            .set(society.toMap())
-            .await()
+        val code = normalise(society.societyCode)
+        societyDoc(code).set(society.copy(societyCode = code).toMap()).await()
     }
 
     suspend fun updateSociety(society: SocietyInfo) = insertOrUpdateSociety(society)
 
     // ------------------------------------------------------------ residents
 
-    suspend fun insertResident(resident: Resident) {
-        val docId = resident.flatNumber.ifBlank { collection(Collections.RESIDENTS).document().id }
-        val withId = if (resident.id == 0) {
-            resident.copy(id = nextId(Collections.RESIDENTS), docId = docId)
-        } else {
-            resident.copy(docId = docId)
-        }
-        collection(Collections.RESIDENTS).document(docId).set(withId.toMap()).await()
+    suspend fun insertResident(resident: Resident, societyCode: String? = null) {
+        val code = societyCode ?: _activeSocietyCode.value ?: return
+        val flats = sub(code, Collections.RESIDENTS)
+        val docId = resident.flatNumber.trim().uppercase().ifBlank { flats.document().id }
+        val withId = resident.copy(
+            id = if (resident.id == 0) nextId(code, Collections.RESIDENTS) else resident.id,
+            flatNumber = docId,
+            docId = docId,
+        )
+        flats.document(docId).set(withId.toMap()).await()
     }
 
     suspend fun updateResident(resident: Resident) {
+        val flats = active(Collections.RESIDENTS) ?: return
         val docId = resident.docId.ifBlank { resident.flatNumber }
-        collection(Collections.RESIDENTS).document(docId).set(resident.toMap()).await()
+        flats.document(docId).set(resident.toMap()).await()
     }
 
     suspend fun deleteResident(resident: Resident) {
-        val docId = resident.docId.ifBlank { resident.flatNumber }
-        collection(Collections.RESIDENTS).document(docId).delete().await()
+        val flats = active(Collections.RESIDENTS) ?: return
+        flats.document(resident.docId.ifBlank { resident.flatNumber }).delete().await()
     }
 
     suspend fun updateResidentPin(flatNumber: String, newPin: String) {
+        val flats = active(Collections.RESIDENTS) ?: return
         val resident = getResidentByFlat(flatNumber) ?: return
-        collection(Collections.RESIDENTS)
-            .document(resident.docId.ifBlank { resident.flatNumber })
-            .update("pin", newPin)
-            .await()
+        flats.document(resident.docId.ifBlank { resident.flatNumber })
+            .update("pin", newPin).await()
     }
 
     // ------------------------------------------------------ maintenance bills
 
     suspend fun insertBill(bill: MaintenanceBill) {
-        val withId = bill.copy(id = if (bill.id == 0) nextId(Collections.MAINTENANCE_BILLS) else bill.id)
-        collection(Collections.MAINTENANCE_BILLS).add(withId.toMap()).await()
+        val code = _activeSocietyCode.value ?: return
+        val withId = bill.copy(
+            id = if (bill.id == 0) nextId(code, Collections.MAINTENANCE_BILLS) else bill.id
+        )
+        sub(code, Collections.MAINTENANCE_BILLS).add(withId.toMap()).await()
     }
 
     suspend fun updateBill(bill: MaintenanceBill) {
+        val bills = active(Collections.MAINTENANCE_BILLS) ?: return
         if (bill.docId.isBlank()) return
-        collection(Collections.MAINTENANCE_BILLS).document(bill.docId).set(bill.toMap()).await()
+        bills.document(bill.docId).set(bill.toMap()).await()
     }
 
     // ------------------------------------------------------------- expenses
 
     suspend fun insertExpense(expense: ExpenseRecord) {
-        val withId = expense.copy(id = if (expense.id == 0) nextId(Collections.EXPENSE_RECORDS) else expense.id)
-        collection(Collections.EXPENSE_RECORDS).add(withId.toMap()).await()
+        val code = _activeSocietyCode.value ?: return
+        val withId = expense.copy(
+            id = if (expense.id == 0) nextId(code, Collections.EXPENSE_RECORDS) else expense.id
+        )
+        sub(code, Collections.EXPENSE_RECORDS).add(withId.toMap()).await()
         adjustTreasury(-expense.amount, expense.paymentMode)
     }
 
     suspend fun deleteExpense(expense: ExpenseRecord) {
+        val expenses = active(Collections.EXPENSE_RECORDS) ?: return
         if (expense.docId.isBlank()) return
-        collection(Collections.EXPENSE_RECORDS).document(expense.docId).delete().await()
+        expenses.document(expense.docId).delete().await()
         adjustTreasury(expense.amount, expense.paymentMode)
     }
 
     // ------------------------------------------------------- non-fee revenue
 
     suspend fun insertRevenue(revenue: NonFeeRevenue) {
-        val withId = revenue.copy(id = if (revenue.id == 0) nextId(Collections.NON_FEE_REVENUES) else revenue.id)
-        collection(Collections.NON_FEE_REVENUES).add(withId.toMap()).await()
+        val code = _activeSocietyCode.value ?: return
+        val withId = revenue.copy(
+            id = if (revenue.id == 0) nextId(code, Collections.NON_FEE_REVENUES) else revenue.id
+        )
+        sub(code, Collections.NON_FEE_REVENUES).add(withId.toMap()).await()
         adjustTreasury(revenue.amount, revenue.paymentMode)
     }
 
     suspend fun deleteRevenue(revenue: NonFeeRevenue) {
+        val revenues = active(Collections.NON_FEE_REVENUES) ?: return
         if (revenue.docId.isBlank()) return
-        collection(Collections.NON_FEE_REVENUES).document(revenue.docId).delete().await()
+        revenues.document(revenue.docId).delete().await()
     }
 
     // ------------------------------------------------------------- visitors
 
     suspend fun insertVisitor(visitor: VisitorLog) {
-        val withId = visitor.copy(id = if (visitor.id == 0) nextId(Collections.VISITOR_LOGS) else visitor.id)
-        collection(Collections.VISITOR_LOGS).add(withId.toMap()).await()
+        val code = _activeSocietyCode.value ?: return
+        val withId = visitor.copy(
+            id = if (visitor.id == 0) nextId(code, Collections.VISITOR_LOGS) else visitor.id
+        )
+        sub(code, Collections.VISITOR_LOGS).add(withId.toMap()).await()
     }
 
     suspend fun updateVisitor(visitor: VisitorLog) {
+        val visitors = active(Collections.VISITOR_LOGS) ?: return
         if (visitor.docId.isBlank()) return
-        collection(Collections.VISITOR_LOGS).document(visitor.docId).set(visitor.toMap()).await()
+        visitors.document(visitor.docId).set(visitor.toMap()).await()
     }
 
     suspend fun verifyVisitorPasscode(passcode: String): VisitorLog? = runCatching {
-        collection(Collections.VISITOR_LOGS)
-            .whereEqualTo("passcode", passcode)
-            .limit(1)
-            .get()
-            .await()
-            .documents
-            .firstOrNull()
-            ?.toVisitorLog()
+        val visitors = active(Collections.VISITOR_LOGS) ?: return null
+        visitors.whereEqualTo("passcode", passcode.trim()).limit(1).get().await()
+            .documents.firstOrNull()?.toVisitorLog()
     }.onFailure { Log.e(TAG, "verifyVisitorPasscode failed", it) }.getOrNull()
 
     suspend fun markVisitorExit(visitorId: Int, exitTime: String, visitor: VisitorLog) {
@@ -299,33 +365,38 @@ class SocietyRepository(context: Context) {
     // -------------------------------------------------------------- notices
 
     suspend fun insertNotice(notice: Notice) {
-        val withId = notice.copy(id = if (notice.id == 0) nextId(Collections.NOTICES) else notice.id)
-        collection(Collections.NOTICES).add(withId.toMap()).await()
+        val code = _activeSocietyCode.value ?: return
+        val withId = notice.copy(
+            id = if (notice.id == 0) nextId(code, Collections.NOTICES) else notice.id
+        )
+        sub(code, Collections.NOTICES).add(withId.toMap()).await()
     }
 
     suspend fun deleteNotice(notice: Notice) {
+        val notices = active(Collections.NOTICES) ?: return
         if (notice.docId.isBlank()) return
-        collection(Collections.NOTICES).document(notice.docId).delete().await()
+        notices.document(notice.docId).delete().await()
     }
 
     // ----------------------------------------------------------- complaints
 
     suspend fun insertComplaint(complaint: Complaint) {
-        val withId = complaint.copy(id = if (complaint.id == 0) nextId(Collections.COMPLAINTS) else complaint.id)
-        collection(Collections.COMPLAINTS).add(withId.toMap()).await()
+        val code = _activeSocietyCode.value ?: return
+        val withId = complaint.copy(
+            id = if (complaint.id == 0) nextId(code, Collections.COMPLAINTS) else complaint.id
+        )
+        sub(code, Collections.COMPLAINTS).add(withId.toMap()).await()
     }
 
     suspend fun updateComplaintStatus(complaint: Complaint, newStatus: TicketStatus, notes: String) {
+        val complaints = active(Collections.COMPLAINTS) ?: return
         if (complaint.docId.isBlank()) return
-        collection(Collections.COMPLAINTS)
-            .document(complaint.docId)
-            .update(
-                mapOf(
-                    "status" to newStatus.name,
-                    "resolutionNotes" to notes.ifBlank { complaint.resolutionNotes }
-                )
+        complaints.document(complaint.docId).update(
+            mapOf(
+                "status" to newStatus.name,
+                "resolutionNotes" to notes.ifBlank { complaint.resolutionNotes },
             )
-            .await()
+        ).await()
     }
 
     // ---------------------------------------------------------- maintenance
@@ -335,37 +406,30 @@ class SocietyRepository(context: Context) {
         amount: Double,
         paymentMode: PaymentMode,
         transactionRef: String,
-        paidDate: String
+        paidDate: String,
     ) {
         adjustTreasury(amount, paymentMode)
     }
 
     // --------------------------------------------------------------- shared
 
-    /**
-     * Moves money in or out of the society treasury. Cash payments hit the cash
-     * balance, everything else hits the bank balance.
-     */
+    /** Cash payments move the cash balance, everything else the bank balance. */
     private suspend fun adjustTreasury(delta: Double, mode: PaymentMode) {
+        val code = _activeSocietyCode.value ?: return
         val field = if (mode == PaymentMode.CASH) "currentBalanceCash" else "currentBalanceBank"
         runCatching {
-            collection(Collections.SOCIETY_INFO)
-                .document(Collections.SOCIETY_DOC)
-                .update(field, FieldValue.increment(delta))
-                .await()
+            societyDoc(code).update(field, FieldValue.increment(delta)).await()
         }.onFailure { Log.e(TAG, "treasury update failed", it) }
     }
 
     /**
-     * Hands out the next numeric id for a collection. The counters collection
-     * keeps the legacy auto-increment ids the UI sorts and keys on working the
-     * same way they did under Room.
+     * Next numeric id for a collection, from a per-society counter. Ids restart
+     * at 1 for every society, so two societies both have a bill #1.
      */
-    private suspend fun nextId(collectionName: String): Int = runCatching {
-        val counter = collection(Collections.COUNTERS).document(collectionName)
+    private suspend fun nextId(societyCode: String, collectionName: String): Int = runCatching {
+        val counter = sub(societyCode, Collections.COUNTERS).document(collectionName)
         db.runTransaction { txn ->
-            val current = txn.get(counter).getLong("value") ?: 0L
-            val next = current + 1
+            val next = (txn.get(counter).getLong("value") ?: 0L) + 1
             txn.set(counter, mapOf("value" to next, "collection" to collectionName, "docId" to collectionName))
             next.toInt()
         }.await()

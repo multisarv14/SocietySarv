@@ -224,38 +224,36 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
                 return@safeLaunch
             }
 
-            val society = repository.getSocietyInfoSync()
+            // Find the society by its login code. Each society is its own
+            // document, so any number of them can coexist.
+            val society = repository.findSocietyByCode(code)
             if (society == null) {
                 onResult(false, msg(
-                    "अद्याप कोणतीही सोसायटी नोंदणीकृत नाही. प्रथम 'नवीन सोसायटी नोंदणी' करा.",
-                    "अभी तक कोई सोसायटी पंजीकृत नहीं है। पहले 'नई सोसायटी पंजीकरण' करें।",
-                    "No society is registered yet. Use 'Register New Society' first."
+                    "हा सोसायटी कोड सापडला नाही. कोड तपासा किंवा 'नवीन सोसायटी नोंदणी' करा.",
+                    "यह सोसायटी कोड नहीं मिला। कोड जांचें या 'नई सोसायटी पंजीकरण' करें।",
+                    "No society found with that code. Check the code, or use 'Register New Society'."
                 ))
                 return@safeLaunch
             }
 
-            if (!society.societyCode.trim().equals(code, ignoreCase = true)) {
-                onResult(false, msg(
-                    "अवैध सोसायटी कोड!",
-                    "अमान्य सोसायटी कोड!",
-                    "Invalid society code!"
-                ))
-                return@safeLaunch
-            }
+            // Scope every following read and write to this society.
+            repository.setActiveSociety(society.societyCode)
 
-            val resident = repository.getResidentByFlat(identifier)
-                ?: repository.getResidentByMobile(identifier)
+            val resident = repository.getResidentByFlat(identifier, society.societyCode)
+                ?: repository.getResidentByMobile(identifier, society.societyCode)
 
             if (resident == null) {
+                repository.clearActiveSociety()
                 onResult(false, msg(
-                    "हा फ्लॅट किंवा मोबाईल क्रमांक नोंदणीकृत नाही!",
-                    "यह फ्लैट या मोबाइल नंबर पंजीकृत नहीं है!",
-                    "That flat or mobile number is not registered."
+                    "हा फ्लॅट किंवा मोबाईल क्रमांक ${society.name} मध्ये नोंदणीकृत नाही!",
+                    "यह फ्लैट या मोबाइल नंबर ${society.name} में पंजीकृत नहीं है!",
+                    "That flat or mobile number is not registered in ${society.name}."
                 ))
                 return@safeLaunch
             }
 
             if (resident.pin.isBlank()) {
+                repository.clearActiveSociety()
                 onResult(false, msg(
                     "या सभासदासाठी पिन सेट केलेला नाही. समितीकडून पिन सेट करून घ्या.",
                     "इस सदस्य के लिए पिन सेट नहीं है। समिति से पिन सेट करवाएं।",
@@ -265,6 +263,7 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
             }
 
             if (resident.pin != enteredPin) {
+                repository.clearActiveSociety()
                 onResult(false, msg("चुकीचा पिन!", "गलत पिन!", "Incorrect PIN."))
                 return@safeLaunch
             }
@@ -283,6 +282,7 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun logout() {
+        repository.clearActiveSociety()
         _currentUser.value = null
         _selectedTab.value = NavDestination.DASHBOARD
     }
@@ -331,14 +331,14 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
                 return@safeLaunch
             }
 
-            // One society per install - re-registering would orphan the existing
-            // members and ledgers that already point at the current society.
-            val existing = repository.getSocietyInfoSync()
-            if (existing != null && existing.societyCode.isNotBlank()) {
+            // Any number of societies can exist side by side; the login code is
+            // what tells them apart, so it has to be unique.
+            val clash = repository.findSocietyByCode(societyCode)
+            if (clash != null) {
                 onResult(false, msg(
-                    "'${existing.name}' (कोड ${existing.societyCode}) आधीच नोंदणीकृत आहे. कृपया लॉगिन करा.",
-                    "'${existing.name}' (कोड ${existing.societyCode}) पहले से पंजीकृत है। कृपया लॉगिन करें।",
-                    "'${existing.name}' (code ${existing.societyCode}) is already registered. Please log in instead."
+                    "कोड $societyCode आधीच '${clash.name}' साठी वापरला जातो. दुसरा कोड निवडा.",
+                    "कोड $societyCode पहले से '${clash.name}' के लिए उपयोग में है। दूसरा कोड चुनें।",
+                    "Code $societyCode is already used by '${clash.name}'. Please pick a different code."
                 ))
                 return@safeLaunch
             }
@@ -362,6 +362,7 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
                 tariffShop = tariffShop
             )
             repository.insertOrUpdateSociety(newSoc)
+            repository.setActiveSociety(societyCode)
 
             val chairman = Resident(
                 flatNumber = flatNumber,
@@ -374,9 +375,9 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
                 flatType = FlatType.THREE_BHK,
                 balanceDue = 0.0
             )
-            repository.insertResident(chairman)
+            repository.insertResident(chairman, societyCode)
 
-            _currentUser.value = repository.getResidentByFlat(flatNumber) ?: chairman
+            _currentUser.value = repository.getResidentByFlat(flatNumber, societyCode) ?: chairman
             _selectedTab.value = NavDestination.DASHBOARD
             onResult(true, msg(
                 "सोसायटी नोंदणी यशस्वी! लॉगिनसाठी कोड $societyCode व फ्लॅट $flatNumber वापरा.",
