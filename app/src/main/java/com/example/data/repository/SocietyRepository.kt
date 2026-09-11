@@ -8,7 +8,6 @@ import com.example.data.entity.ExpenseRecord
 import com.example.data.entity.MaintenanceBill
 import com.example.data.entity.NonFeeRevenue
 import com.example.data.entity.Notice
-import com.example.data.entity.PaymentMode
 import com.example.data.entity.Resident
 import com.example.data.entity.SocietyInfo
 import com.example.data.entity.TicketStatus
@@ -238,10 +237,58 @@ class SocietyRepository(context: Context) {
     suspend fun getResidentByMobile(mobile: String, societyCode: String? = null): Resident? =
         runCatching {
             val code = societyCode ?: _activeSocietyCode.value ?: return null
-            sub(code, Collections.RESIDENTS)
-                .whereEqualTo("contactNumber", mobile.trim()).limit(1).get().await()
+            val wanted = mobile.trim()
+            val exact = sub(code, Collections.RESIDENTS)
+                .whereEqualTo("contactNumber", wanted).limit(1).get().await()
                 .documents.firstOrNull()?.toResident()
+            if (exact != null) return@runCatching exact
+
+            // Members are not always stored in one tidy format - "+91 98765
+            // 43210" and "9876543210" are the same person - so fall back to
+            // comparing the last ten digits.
+            val digits = wanted.filter { it.isDigit() }.takeLast(10)
+            if (digits.length < 10) return@runCatching null
+            sub(code, Collections.RESIDENTS).get().await().documents
+                .map { it.toResident() }
+                .firstOrNull { it.contactNumber.filter { ch -> ch.isDigit() }.takeLast(10) == digits }
         }.onFailure { Log.e(TAG, "getResidentByMobile failed", it) }.getOrNull()
+
+    // ---------------------------------------------------------------- mail
+
+    /**
+     * Queues the "new society registered" notification for the mail worker.
+     *
+     * The document id is the society's own login code, and the write is only
+     * made when nothing is there yet - so a retry, a re-run, or two devices
+     * finishing the same registration cannot post the message twice.
+     *
+     * Returns true when a message was queued, false when one already existed
+     * or the write was refused; a notification is never worth failing a
+     * registration over.
+     */
+    suspend fun queueSocietyRegistrationEmail(
+        societyCode: String,
+        from: String,
+        to: String,
+        subject: String,
+        bodyText: String,
+        bodyHtml: String
+    ): Boolean = runCatching {
+        val mail = db.collection(Collections.MAIL).document("society-${normalise(societyCode)}")
+        if (mail.get().await().exists()) return@runCatching false
+        mail.set(
+            mapOf(
+                "to" to listOf(to),
+                "from" to from,
+                "message" to mapOf(
+                    "subject" to subject,
+                    "text" to bodyText,
+                    "html" to bodyHtml
+                )
+            )
+        ).await()
+        true
+    }.onFailure { Log.e(TAG, "could not queue the registration email", it) }.getOrDefault(false)
 
     // ------------------------------------------------------------- society
 
@@ -285,6 +332,55 @@ class SocietyRepository(context: Context) {
             .update("pin", newPin).await()
     }
 
+    /**
+     * PIN reset for a society the device is not signed in to - the "Forgot PIN"
+     * flow runs before login, so there is no active society to scope against.
+     */
+    suspend fun resetResidentPin(societyCode: String, resident: Resident, newPin: String) {
+        val docId = resident.docId.ifBlank { resident.flatNumber }
+        sub(societyCode, Collections.RESIDENTS).document(docId)
+            .update("pin", newPin).await()
+    }
+
+    /**
+     * Writes the freshly generated, still-vacant units of a wing in one batch.
+     * Flat numbers that already carry a resident are left untouched.
+     */
+    suspend fun insertVacantUnits(societyCode: String, units: List<Resident>) {
+        if (units.isEmpty()) return
+        val flats = sub(societyCode, Collections.RESIDENTS)
+        val existing = runCatching {
+            flats.get().await().documents.map { it.id.uppercase() }.toSet()
+        }.getOrDefault(emptySet())
+
+        var nextId = nextId(societyCode, Collections.RESIDENTS)
+        val firstId = nextId
+        units.chunked(BATCH_LIMIT).forEach { chunk ->
+            val batch = db.batch()
+            var wrote = 0
+            chunk.forEach { unit ->
+                val docId = unit.flatNumber.trim().uppercase()
+                if (docId.isBlank() || docId in existing) return@forEach
+                batch.set(
+                    flats.document(docId),
+                    unit.copy(docId = docId, flatNumber = docId, id = nextId++).toMap()
+                )
+                wrote++
+            }
+            if (wrote > 0) batch.commit().await()
+        }
+
+        // nextId() only claimed a single id; carry the counter past the rest so
+        // the next resident added by hand does not reuse one of these.
+        val consumed = nextId - firstId
+        if (consumed > 1) {
+            runCatching {
+                sub(societyCode, Collections.COUNTERS).document(Collections.RESIDENTS)
+                    .update("value", FieldValue.increment((consumed - 1).toLong())).await()
+            }.onFailure { Log.e(TAG, "unit counter bump failed", it) }
+        }
+    }
+
     // ------------------------------------------------------ maintenance bills
 
     suspend fun insertBill(bill: MaintenanceBill) {
@@ -301,6 +397,12 @@ class SocietyRepository(context: Context) {
         bills.document(bill.docId).set(bill.toMap()).await()
     }
 
+    suspend fun deleteBill(bill: MaintenanceBill) {
+        val bills = active(Collections.MAINTENANCE_BILLS) ?: return
+        if (bill.docId.isBlank()) return
+        bills.document(bill.docId).delete().await()
+    }
+
     // ------------------------------------------------------------- expenses
 
     suspend fun insertExpense(expense: ExpenseRecord) {
@@ -309,14 +411,24 @@ class SocietyRepository(context: Context) {
             id = if (expense.id == 0) nextId(code, Collections.EXPENSE_RECORDS) else expense.id
         )
         sub(code, Collections.EXPENSE_RECORDS).add(withId.toMap()).await()
-        adjustTreasury(-expense.amount, expense.paymentMode)
+    }
+
+    /**
+     * Rewrites an expense. Nothing is settled against the society's balance
+     * here - the balance is worked out from the vouchers themselves, so the
+     * new amount takes effect the moment this document changes.
+     */
+    suspend fun updateExpense(previous: ExpenseRecord, updated: ExpenseRecord) {
+        val expenses = active(Collections.EXPENSE_RECORDS) ?: return
+        val docId = updated.docId.ifBlank { previous.docId }
+        if (docId.isBlank()) return
+        expenses.document(docId).set(updated.copy(docId = docId).toMap()).await()
     }
 
     suspend fun deleteExpense(expense: ExpenseRecord) {
         val expenses = active(Collections.EXPENSE_RECORDS) ?: return
         if (expense.docId.isBlank()) return
         expenses.document(expense.docId).delete().await()
-        adjustTreasury(expense.amount, expense.paymentMode)
     }
 
     // ------------------------------------------------------- non-fee revenue
@@ -327,7 +439,6 @@ class SocietyRepository(context: Context) {
             id = if (revenue.id == 0) nextId(code, Collections.NON_FEE_REVENUES) else revenue.id
         )
         sub(code, Collections.NON_FEE_REVENUES).add(withId.toMap()).await()
-        adjustTreasury(revenue.amount, revenue.paymentMode)
     }
 
     suspend fun deleteRevenue(revenue: NonFeeRevenue) {
@@ -388,6 +499,18 @@ class SocietyRepository(context: Context) {
         sub(code, Collections.COMPLAINTS).add(withId.toMap()).await()
     }
 
+    suspend fun updateComplaint(complaint: Complaint) {
+        val complaints = active(Collections.COMPLAINTS) ?: return
+        if (complaint.docId.isBlank()) return
+        complaints.document(complaint.docId).set(complaint.toMap()).await()
+    }
+
+    suspend fun deleteComplaint(complaint: Complaint) {
+        val complaints = active(Collections.COMPLAINTS) ?: return
+        if (complaint.docId.isBlank()) return
+        complaints.document(complaint.docId).delete().await()
+    }
+
     suspend fun updateComplaintStatus(complaint: Complaint, newStatus: TicketStatus, notes: String) {
         val complaints = active(Collections.COMPLAINTS) ?: return
         if (complaint.docId.isBlank()) return
@@ -399,28 +522,26 @@ class SocietyRepository(context: Context) {
         ).await()
     }
 
-    // ---------------------------------------------------------- maintenance
+    // -------------------------------------------------- emergency contacts
 
-    suspend fun recordMaintenancePayment(
-        billId: Int,
-        amount: Double,
-        paymentMode: PaymentMode,
-        transactionRef: String,
-        paidDate: String,
-    ) {
-        adjustTreasury(amount, paymentMode)
+    /** Creates or updates one emergency contact for the active society. */
+    suspend fun saveEmergencyContact(contact: EmergencyContact) {
+        val code = _activeSocietyCode.value ?: return
+        val contacts = sub(code, Collections.EMERGENCY_CONTACTS)
+        val withId = contact.copy(
+            id = if (contact.id == 0) nextId(code, Collections.EMERGENCY_CONTACTS) else contact.id
+        )
+        val docId = withId.docId.ifBlank { contacts.document().id }
+        contacts.document(docId).set(withId.copy(docId = docId).toMap()).await()
+    }
+
+    suspend fun deleteEmergencyContact(contact: EmergencyContact) {
+        val contacts = active(Collections.EMERGENCY_CONTACTS) ?: return
+        if (contact.docId.isBlank()) return
+        contacts.document(contact.docId).delete().await()
     }
 
     // --------------------------------------------------------------- shared
-
-    /** Cash payments move the cash balance, everything else the bank balance. */
-    private suspend fun adjustTreasury(delta: Double, mode: PaymentMode) {
-        val code = _activeSocietyCode.value ?: return
-        val field = if (mode == PaymentMode.CASH) "currentBalanceCash" else "currentBalanceBank"
-        runCatching {
-            societyDoc(code).update(field, FieldValue.increment(delta)).await()
-        }.onFailure { Log.e(TAG, "treasury update failed", it) }
-    }
 
     /**
      * Next numeric id for a collection, from a per-society counter. Ids restart
@@ -439,6 +560,9 @@ class SocietyRepository(context: Context) {
     }
 
     private companion object {
+        /** Firestore caps a write batch at 500 operations. */
+        const val BATCH_LIMIT = 400
+
         const val TAG = "SocietyRepository"
     }
 }

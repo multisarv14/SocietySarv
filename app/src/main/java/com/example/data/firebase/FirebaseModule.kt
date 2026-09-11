@@ -97,4 +97,15 @@ object Collections {
     const val COMPLAINTS = "complaints"
     const val EMERGENCY_CONTACTS = "emergency_contacts"
     const val COUNTERS = "counters"
+
+    /**
+     * Outgoing email, queued for the mail worker to send.
+     *
+     * The app never talks to an SMTP server itself - doing so would mean
+     * shipping the multisarv mail password inside the APK, where anyone could
+     * pull it out and send mail as that address. Instead a document is written
+     * here and the Firebase "Trigger Email from Firestore" extension (or any
+     * equivalent worker holding the credentials server-side) delivers it.
+     */
+    const val MAIL = "mail"
 }

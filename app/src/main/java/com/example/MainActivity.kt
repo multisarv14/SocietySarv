@@ -13,12 +13,11 @@ import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.CorporateFare
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.SupportAgent
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -34,8 +33,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -49,13 +50,17 @@ import com.example.ui.screens.AccountingScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.CommunityScreen
 import com.example.ui.screens.DashboardScreen
-import com.example.ui.screens.FileComplaintDialog
 import com.example.ui.screens.GateSecurityScreen
 import com.example.ui.screens.MaintenanceScreen
 import com.example.ui.screens.ResidentPortalScreen
+import com.example.ui.screens.ResidentsScreen
+import com.example.ui.screens.SocietyProfileDialog
+import com.example.ui.screens.SocietyProfileEditorScreen
+import com.example.ui.screens.UserProfileDialog
 import com.example.ui.theme.SocietySarvTheme
 import com.example.ui.theme.TealPrimary
 import com.example.viewmodel.NavDestination
+import com.example.viewmodel.destinationsFor
 import com.example.viewmodel.SocietyViewModel
 
 class MainActivity : ComponentActivity() {
@@ -78,9 +83,12 @@ fun SocietySarvApp(viewModel: SocietyViewModel = viewModel()) {
     val selectedTab by viewModel.selectedTab.collectAsState()
     val financialOverview by viewModel.financialOverview.collectAsState()
     val userMessage by viewModel.userMessage.collectAsState()
+    val isRestoringSession by viewModel.isRestoringSession.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
-    var isHelpdeskDialogOpen by remember { mutableStateOf(false) }
+    var isSocietyProfileOpen by remember { mutableStateOf(false) }
+    var isSocietyEditorOpen by remember { mutableStateOf(false) }
+    var isUserProfileOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(userMessage) {
         userMessage?.let { msg ->
@@ -89,20 +97,39 @@ fun SocietySarvApp(viewModel: SocietyViewModel = viewModel()) {
         }
     }
 
-    // Resident Helpdesk Complaint Form Dialog (triggered via FAB)
-    if (isHelpdeskDialogOpen) {
-        FileComplaintDialog(
+    if (isSocietyProfileOpen) {
+        SocietyProfileDialog(
+            society = societyInfo,
             currentUser = currentUser,
             language = language,
-            onDismiss = { isHelpdeskDialogOpen = false },
-            onSubmit = { cat, desc, flat, name ->
-                viewModel.fileComplaint(cat, desc, flat, name)
-                isHelpdeskDialogOpen = false
-            }
+            onDismiss = { isSocietyProfileOpen = false },
+            onEdit = { isSocietyProfileOpen = false; isSocietyEditorOpen = true }
         )
     }
 
-    if (currentUser == null) {
+    if (isUserProfileOpen) {
+        UserProfileDialog(
+            viewModel = viewModel,
+            currentUser = currentUser,
+            language = language,
+            onDismiss = { isUserProfileOpen = false },
+            onLogout = { viewModel.logout() }
+        )
+    }
+
+    if (currentUser == null && isRestoringSession) {
+        // A remembered member is being signed back in - show a spinner rather
+        // than flashing the login form at somebody who never has to see it.
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(
+                color = TealPrimary,
+                modifier = Modifier.testTag("session_restore_spinner")
+            )
+        }
+    } else if (currentUser == null) {
         AuthScreen(
             viewModel = viewModel,
             societyInfo = societyInfo,
@@ -118,8 +145,8 @@ fun SocietySarvApp(viewModel: SocietyViewModel = viewModel()) {
                     currentLanguage = language,
                     onToggleLanguage = { viewModel.toggleLanguage() },
                     onSelectLanguage = { viewModel.setLanguage(it) },
-                    onLogout = { viewModel.logout() },
-                    onSwitchProfile = { viewModel.logout() }
+                    onOpenSocietyProfile = { isSocietyProfileOpen = true },
+                    onOpenUserProfile = { isUserProfileOpen = true }
                 )
             },
             bottomBar = {
@@ -129,34 +156,6 @@ fun SocietySarvApp(viewModel: SocietyViewModel = viewModel()) {
                     language = language,
                     onSelectTab = { viewModel.selectTab(it) }
                 )
-            },
-            floatingActionButton = {
-                // Floating Action Button (FAB) on main screen for resident helpdesk complaints
-                if (selectedTab == NavDestination.DASHBOARD || selectedTab == NavDestination.COMMUNITY || selectedTab == NavDestination.RESIDENT_PORTAL) {
-                    ExtendedFloatingActionButton(
-                        onClick = { isHelpdeskDialogOpen = true },
-                        containerColor = TealPrimary,
-                        contentColor = Color.White,
-                        icon = {
-                            Icon(
-                                imageVector = Icons.Default.SupportAgent,
-                                contentDescription = "Helpdesk",
-                                modifier = Modifier.size(24.dp)
-                            )
-                        },
-                        text = {
-                            Text(
-                                text = when (language) {
-                                    AppLanguage.MARATHI -> "तक्रार दाखल करा"
-                                    AppLanguage.HINDI -> "शिकायत दर्ज करें"
-                                    AppLanguage.ENGLISH -> "Helpdesk Complaint"
-                                },
-                                fontWeight = FontWeight.Bold
-                            )
-                        },
-                        modifier = Modifier.testTag("main_screen_helpdesk_fab")
-                    )
-                }
             },
             snackbarHost = { SnackbarHost(snackbarHostState) },
             modifier = Modifier.fillMaxSize()
@@ -186,6 +185,11 @@ fun SocietySarvApp(viewModel: SocietyViewModel = viewModel()) {
                         society = societyInfo,
                         language = language
                     )
+                    NavDestination.RESIDENTS -> ResidentsScreen(
+                        viewModel = viewModel,
+                        society = societyInfo,
+                        language = language
+                    )
                     NavDestination.GATE -> GateSecurityScreen(
                         viewModel = viewModel,
                         currentUser = currentUser,
@@ -206,6 +210,19 @@ fun SocietySarvApp(viewModel: SocietyViewModel = viewModel()) {
             }
         }
     }
+
+    // The Society Profile editing wizard, drawn over everything else. It is a
+    // screen rather than a dialog so its buttons honour the gesture bar, and it
+    // is emitted last so it paints on top of the scaffold beneath it.
+    val editableSociety = societyInfo
+    if (isSocietyEditorOpen && editableSociety != null && currentUser != null) {
+        SocietyProfileEditorScreen(
+            viewModel = viewModel,
+            society = editableSociety,
+            language = language,
+            onClose = { isSocietyEditorOpen = false }
+        )
+    }
 }
 
 @Composable
@@ -215,78 +232,56 @@ fun SocietyBottomNavigation(
     language: AppLanguage,
     onSelectTab: (NavDestination) -> Unit
 ) {
-    NavigationBar(
-        tonalElevation = 6.dp
-    ) {
-        val isResidentOrTenant = userRole == UserRole.RESIDENT || userRole == UserRole.TENANT
-        val isGuard = userRole == UserRole.GUARD
+    // The role decides the whole bar - Residents is the Chairman's, Security is
+    // the security team's, and nobody sees a tab they cannot open.
+    val destinations = destinationsFor(userRole)
 
-        if (isGuard) {
+    NavigationBar(tonalElevation = 6.dp) {
+        destinations.forEach { destination ->
             NavigationBarItem(
-                selected = selectedTab == NavDestination.GATE,
-                onClick = { onSelectTab(NavDestination.GATE) },
-                icon = { Icon(Icons.Default.Security, contentDescription = "Gate") },
-                label = { Text(AppStrings.get("gate_security", language), fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-                modifier = Modifier.testTag("nav_gate")
-            )
-            NavigationBarItem(
-                selected = selectedTab == NavDestination.COMMUNITY,
-                onClick = { onSelectTab(NavDestination.COMMUNITY) },
-                icon = { Icon(Icons.Default.Forum, contentDescription = "Community") },
-                label = { Text(AppStrings.get("community_forum", language), fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-                modifier = Modifier.testTag("nav_community")
-            )
-            return@NavigationBar
-        }
-
-        NavigationBarItem(
-            selected = selectedTab == NavDestination.DASHBOARD,
-            onClick = { onSelectTab(NavDestination.DASHBOARD) },
-            icon = { Icon(Icons.Default.Dashboard, contentDescription = "Dashboard") },
-            label = { Text(AppStrings.get("nav_dashboard", language), fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-            modifier = Modifier.testTag("nav_dashboard")
-        )
-
-        NavigationBarItem(
-            selected = selectedTab == NavDestination.ACCOUNTS,
-            onClick = { onSelectTab(NavDestination.ACCOUNTS) },
-            icon = { Icon(Icons.Default.AccountBalance, contentDescription = "Accounts") },
-            label = { Text(AppStrings.get("nav_accounts", language), fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-            modifier = Modifier.testTag("nav_accounts")
-        )
-
-        NavigationBarItem(
-            selected = selectedTab == NavDestination.MAINTENANCE,
-            onClick = { onSelectTab(NavDestination.MAINTENANCE) },
-            icon = { Icon(Icons.Default.ReceiptLong, contentDescription = "Maintenance") },
-            label = { Text(AppStrings.get("nav_maintenance", language), fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-            modifier = Modifier.testTag("nav_maintenance")
-        )
-
-        NavigationBarItem(
-            selected = selectedTab == NavDestination.GATE,
-            onClick = { onSelectTab(NavDestination.GATE) },
-            icon = { Icon(Icons.Default.Security, contentDescription = "Gate") },
-            label = { Text(AppStrings.get("nav_gate", language), fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-            modifier = Modifier.testTag("nav_gate")
-        )
-
-        NavigationBarItem(
-            selected = selectedTab == NavDestination.COMMUNITY,
-            onClick = { onSelectTab(NavDestination.COMMUNITY) },
-            icon = { Icon(Icons.Default.Forum, contentDescription = "Community") },
-            label = { Text(AppStrings.get("nav_community", language), fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-            modifier = Modifier.testTag("nav_community")
-        )
-
-        if (isResidentOrTenant) {
-            NavigationBarItem(
-                selected = selectedTab == NavDestination.RESIDENT_PORTAL,
-                onClick = { onSelectTab(NavDestination.RESIDENT_PORTAL) },
-                icon = { Icon(Icons.Default.Home, contentDescription = "My Flat") },
-                label = { Text(AppStrings.get("my_flat_portal", language), fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-                modifier = Modifier.testTag("nav_my_flat")
+                selected = selectedTab == destination,
+                onClick = { onSelectTab(destination) },
+                icon = { Icon(destination.icon(), contentDescription = destination.name) },
+                label = {
+                    Text(
+                        text = AppStrings.get(destination.labelKey(), language),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
+                    )
+                },
+                modifier = Modifier.testTag(destination.testTag())
             )
         }
     }
+}
+
+private fun NavDestination.icon(): ImageVector = when (this) {
+    NavDestination.DASHBOARD -> Icons.Default.Dashboard
+    NavDestination.ACCOUNTS -> Icons.Default.AccountBalance
+    NavDestination.MAINTENANCE -> Icons.Default.ReceiptLong
+    NavDestination.RESIDENTS -> Icons.Default.Groups
+    NavDestination.GATE -> Icons.Default.Security
+    NavDestination.COMMUNITY -> Icons.Default.Forum
+    NavDestination.RESIDENT_PORTAL -> Icons.Default.Home
+}
+
+private fun NavDestination.labelKey(): String = when (this) {
+    NavDestination.DASHBOARD -> "nav_dashboard"
+    NavDestination.ACCOUNTS -> "nav_accounts"
+    NavDestination.MAINTENANCE -> "nav_maintenance"
+    NavDestination.RESIDENTS -> "nav_residents"
+    NavDestination.GATE -> "nav_gate"
+    NavDestination.COMMUNITY -> "nav_community"
+    NavDestination.RESIDENT_PORTAL -> "my_unit_portal"
+}
+
+private fun NavDestination.testTag(): String = when (this) {
+    NavDestination.DASHBOARD -> "nav_dashboard"
+    NavDestination.ACCOUNTS -> "nav_accounts"
+    NavDestination.MAINTENANCE -> "nav_maintenance"
+    NavDestination.RESIDENTS -> "nav_residents"
+    NavDestination.GATE -> "nav_gate"
+    NavDestination.COMMUNITY -> "nav_community"
+    NavDestination.RESIDENT_PORTAL -> "nav_my_unit"
 }

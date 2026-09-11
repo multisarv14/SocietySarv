@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,7 +28,9 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -37,9 +40,13 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,10 +60,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import com.example.data.entity.MaintenanceBill
 import com.example.data.entity.PaymentStatus
 import com.example.data.entity.Resident
@@ -64,8 +75,14 @@ import com.example.data.entity.SocietyInfo
 import com.example.data.entity.TicketStatus
 import com.example.data.entity.UserRole
 import com.example.data.entity.VisitorStatus
+import com.example.data.entity.chargesSubtotal
+import com.example.data.entity.payableTotal
+import com.example.data.entity.pendingAmount
 import com.example.data.localization.AppLanguage
+import com.example.R
 import com.example.data.localization.AppStrings
+import com.example.util.ReceiptPdf
+import com.example.util.rememberBlobImage
 import com.example.ui.theme.SlateOutlineVariant
 import com.example.ui.theme.SlateSurfaceVariant
 import com.example.ui.theme.StatusOverdue
@@ -76,7 +93,13 @@ import com.example.ui.theme.StatusPending
 import com.example.ui.theme.StatusPendingBg
 import com.example.ui.theme.TealPrimary
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Top bar for every signed-in screen.
+ *
+ * Three tap targets, and nothing else: the society logo opens the Society
+ * Profile, the language globe switches language, and the member's photo opens
+ * their own profile (which is where Logout now lives).
+ */
 @Composable
 fun SocietyTopAppBar(
     societyInfo: SocietyInfo?,
@@ -84,10 +107,8 @@ fun SocietyTopAppBar(
     currentLanguage: AppLanguage,
     onToggleLanguage: () -> Unit,
     onSelectLanguage: ((AppLanguage) -> Unit)? = null,
-    isDarkTheme: Boolean = false,
-    onToggleTheme: () -> Unit = {},
-    onLogout: () -> Unit,
-    onSwitchProfile: () -> Unit,
+    onOpenSocietyProfile: () -> Unit = {},
+    onOpenUserProfile: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showLangMenu by remember { mutableStateOf(false) }
@@ -109,22 +130,12 @@ fun SocietyTopAppBar(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onOpenSocietyProfile() }
+                        .testTag("society_logo_btn")
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color.White.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AccountBalance,
-                            contentDescription = "Society Logo",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
+                    SocietyLogoMark(logoBase64 = societyInfo?.logoBase64, size = 40)
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
@@ -149,51 +160,22 @@ fun SocietyTopAppBar(
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Global Language Switcher Chip / Dropdown (English, Hindi, Marathi)
+                    // Language switcher - icon only, no label.
                     Box {
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = Color.White.copy(alpha = 0.2f),
+                        IconButton(
+                            onClick = {
+                                if (onSelectLanguage != null) showLangMenu = true else onToggleLanguage()
+                            },
                             modifier = Modifier
-                                .clickable {
-                                    if (onSelectLanguage != null) {
-                                        showLangMenu = true
-                                    } else {
-                                        onToggleLanguage()
-                                    }
-                                }
+                                .size(40.dp)
                                 .testTag("language_toggle_btn")
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Language,
-                                    contentDescription = "Language",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = when (currentLanguage) {
-                                        AppLanguage.ENGLISH -> "ENG"
-                                        AppLanguage.HINDI -> "हिन्दी"
-                                        AppLanguage.MARATHI -> "मराठी"
-                                    },
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = Color.White
-                                )
-                                if (onSelectLanguage != null) {
-                                    Spacer(modifier = Modifier.width(2.dp))
-                                    Icon(
-                                        imageVector = Icons.Default.ArrowDropDown,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                }
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Language,
+                                contentDescription = AppStrings.get("switch_language", currentLanguage),
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
                         }
 
                         if (onSelectLanguage != null) {
@@ -201,7 +183,7 @@ fun SocietyTopAppBar(
                                 expanded = showLangMenu,
                                 onDismissRequest = { showLangMenu = false }
                             ) {
-                                AppLanguage.values().forEach { lang ->
+                                AppLanguage.entries.forEach { lang ->
                                     DropdownMenuItem(
                                         text = {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -231,30 +213,15 @@ fun SocietyTopAppBar(
                     }
 
                     if (currentUser != null) {
-                        IconButton(
-                            onClick = onSwitchProfile,
+                        Spacer(modifier = Modifier.width(4.dp))
+                        MemberAvatar(
+                            photoBase64 = currentUser.photoBase64,
+                            name = currentUser.ownerName,
+                            size = 38,
                             modifier = Modifier
-                                .size(36.dp)
-                                .testTag("switch_profile_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = "Switch Profile",
-                                tint = Color.White
-                            )
-                        }
-                        IconButton(
-                            onClick = onLogout,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .testTag("logout_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Logout,
-                                contentDescription = "Logout",
-                                tint = Color.White
-                            )
-                        }
+                                .clickable { onOpenUserProfile() }
+                                .testTag("user_profile_btn")
+                        )
                     }
                 }
             }
@@ -262,17 +229,81 @@ fun SocietyTopAppBar(
     }
 }
 
-fun getRoleLabel(role: UserRole, language: AppLanguage): String {
-    return when (role) {
-        UserRole.CHAIRMAN -> AppStrings.get("role_chairman", language)
-        UserRole.SECRETARY -> AppStrings.get("role_secretary", language)
-        UserRole.TREASURER -> AppStrings.get("role_treasurer", language)
-        UserRole.COMMITTEE -> AppStrings.get("role_committee", language)
-        UserRole.RESIDENT -> AppStrings.get("role_resident", language)
-        UserRole.TENANT -> AppStrings.get("role_tenant", language)
-        UserRole.GUARD -> AppStrings.get("role_guard", language)
+/** The society's uploaded logo, falling back to the SocietySarv mark. */
+@Composable
+fun SocietyLogoMark(logoBase64: String?, size: Int) {
+    val logo = rememberBlobImage(logoBase64)
+    Box(
+        modifier = Modifier
+            .size(size.dp)
+            .clip(RoundedCornerShape((size / 4).dp))
+            .background(Color.White),
+        contentAlignment = Alignment.Center
+    ) {
+        if (logo != null) {
+            Image(
+                bitmap = logo,
+                contentDescription = "Society logo",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(size.dp)
+            )
+        } else {
+            Image(
+                painter = painterResource(id = R.mipmap.ic_launcher_foreground),
+                contentDescription = "SocietySarv logo",
+                modifier = Modifier.size(size.dp)
+            )
+        }
     }
 }
+
+/** Member photo, or their initial when no photo has been uploaded. */
+@Composable
+fun MemberAvatar(
+    photoBase64: String?,
+    name: String,
+    size: Int,
+    modifier: Modifier = Modifier
+) {
+    val photo = rememberBlobImage(photoBase64)
+    Box(
+        modifier = modifier
+            .size(size.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.25f)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (photo != null) {
+            Image(
+                bitmap = photo,
+                contentDescription = "Profile photo",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(size.dp)
+            )
+        } else {
+            Text(
+                text = name.trim().firstOrNull()?.uppercase() ?: "?",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
+    }
+}
+
+fun getRoleLabel(role: UserRole, language: AppLanguage): String = when (role) {
+    UserRole.CHAIRMAN -> AppStrings.get("role_chairman", language)
+    UserRole.SECRETARY -> AppStrings.get("role_secretary", language)
+    UserRole.TREASURER -> AppStrings.get("role_treasurer", language)
+    UserRole.COMMITTEE -> AppStrings.get("role_committee", language)
+    UserRole.RESIDENT -> AppStrings.get("role_resident", language)
+    UserRole.TENANT -> AppStrings.get("role_tenant", language)
+    UserRole.GUARD -> AppStrings.get("role_guard", language)
+    UserRole.HOUSEKEEPING -> AppStrings.get("role_housekeeping", language)
+    UserRole.MAINTENANCE_STAFF -> AppStrings.get("role_maintenance_staff", language)
+    UserRole.ACCOUNTANT -> AppStrings.get("role_accountant", language)
+    UserRole.MANAGER -> AppStrings.get("role_manager", language)
+}
+
 
 @Composable
 fun FinancialKpiCard(
@@ -424,7 +455,9 @@ fun VisitorStatusBadge(
         VisitorStatus.INSIDE -> Triple(StatusPaidBg, StatusPaid, "visitor_inside")
         VisitorStatus.EXITED -> Triple(SlateSurfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant, "visitor_exited")
         VisitorStatus.PRE_APPROVED -> Triple(StatusPendingBg, StatusPending, "generate_passcode")
-        VisitorStatus.REJECTED -> Triple(StatusOverdueBg, StatusOverdue, "status_unpaid")
+        // A turned-away visitor is a gate outcome, not a payment one. This
+        // used to borrow the billing string and read as "Unpaid".
+        VisitorStatus.REJECTED -> Triple(StatusOverdueBg, StatusOverdue, "visitor_rejected")
     }
 
     Surface(
@@ -467,6 +500,11 @@ fun TicketStatusBadge(
     }
 }
 
+/**
+ * On-screen preview of the payment receipt, with the two things a committee
+ * actually needs from it: a proper PDF saved to the device, and a share sheet
+ * to send it on to the member.
+ */
 @Composable
 fun ReceiptDialog(
     bill: MaintenanceBill,
@@ -474,7 +512,13 @@ fun ReceiptDialog(
     language: AppLanguage,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    var status by remember { mutableStateOf<String?>(null) }
+    var isError by remember { mutableStateOf(false) }
+
     AlertDialog(
+        modifier = DialogWidth,
+        properties = WideDialogProperties,
         onDismissRequest = onDismiss,
         title = {
             Row(
@@ -484,7 +528,8 @@ fun ReceiptDialog(
             ) {
                 Text(
                     text = "${AppStrings.get("receipt_generated", language)} #${bill.receiptNumber}",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.weight(1f)
                 )
                 Icon(
                     imageVector = Icons.Default.CheckCircle,
@@ -494,29 +539,90 @@ fun ReceiptDialog(
             }
         },
         text = {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = SlateSurfaceVariant),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = SlateSurfaceVariant),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            SocietyLogoMark(logoBase64 = society?.logoBase64, size = 36)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = society?.name.orEmpty(),
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = TealPrimary
+                                )
+                                Text(
+                                    text = "Reg No: ${society?.registrationNumber.orEmpty().ifBlank { "-" }}",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                        ReceiptRow(label = "Unit / Member", value = "${bill.flatNumber} - ${bill.residentName}")
+                        ReceiptRow(label = "Month", value = bill.billMonth)
+                        ReceiptRow(label = "Bill Amount", value = "₹%,.2f".format(bill.chargesSubtotal))
+                        ReceiptRow(label = "Late Fee", value = "₹%,.2f".format(bill.lateFeeAmount))
+                        ReceiptRow(label = "Total Payable", value = "₹%,.2f".format(bill.payableTotal))
+                        ReceiptRow(label = "Amount Paid", value = "₹%,.2f".format(bill.amountPaid), isBold = true)
+                        ReceiptRow(label = "Balance Outstanding", value = "₹%,.2f".format(bill.pendingAmount))
+                        ReceiptRow(label = "Payment Mode", value = bill.paymentMode?.labelEn ?: "-")
+                        ReceiptRow(label = "Reference No.", value = bill.transactionRef.ifBlank { "-" })
+                        ReceiptRow(label = "Paid On", value = bill.paidDate.ifBlank { "-" })
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            val file = ReceiptPdf.generate(context, bill, society)
+                            isError = file == null
+                            status = if (file == null) {
+                                "Could not create the receipt PDF."
+                            } else {
+                                "Saved as ${file.name}"
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, TealPrimary),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("receipt_pdf_btn")
+                    ) {
+                        Icon(Icons.Default.PictureAsPdf, contentDescription = null, tint = TealPrimary)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(AppStrings.get("download_receipt", language), color = TealPrimary)
+                    }
+                    Button(
+                        onClick = {
+                            val failure = ReceiptPdf.share(context, bill, society)
+                            isError = failure != null
+                            status = failure
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("receipt_share_btn")
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(AppStrings.get("share_receipt", language))
+                    }
+                }
+
+                status?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = society?.name ?: "",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = TealPrimary
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isError) MaterialTheme.colorScheme.error else StatusPaid
                     )
-                    Text(
-                        text = "Reg No: ${society?.registrationNumber ?: "MUM/HSG/2022/984"}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                    ReceiptRow(label = "Flat / Member", value = "${bill.flatNumber} - ${bill.residentName}")
-                    ReceiptRow(label = "Month", value = bill.billMonth)
-                    ReceiptRow(label = "Total Bill", value = "₹%,.2f".format(bill.totalAmount))
-                    ReceiptRow(label = "Amount Paid", value = "₹%,.2f".format(bill.amountPaid), isBold = true)
-                    ReceiptRow(label = "Payment Mode", value = bill.paymentMode?.name ?: "UPI")
-                    ReceiptRow(label = "Reference No.", value = if (bill.transactionRef.isNotBlank()) bill.transactionRef else "N/A")
-                    ReceiptRow(label = "Paid On", value = if (bill.paidDate.isNotBlank()) bill.paidDate else "Today")
                 }
             }
         },
@@ -545,3 +651,174 @@ fun ReceiptRow(label: String, value: String, isBold: Boolean = false) {
         )
     }
 }
+
+/**
+ * How wide a dialog sits on the screen.
+ *
+ * Material's default leaves a lot of margin, which cramps the forms in this
+ * app - month-wise tables, the bill sheet, the registration steps. Every dialog
+ * pairs this with [WideDialogProperties] so they are all the same width.
+ */
+val DialogWidth: Modifier = Modifier.fillMaxWidth(0.96f)
+
+/** Lets a dialog take [DialogWidth] instead of the platform's own width. */
+val WideDialogProperties: DialogProperties =
+    DialogProperties(usePlatformDefaultWidth = false)
+
+/** Far more rows than any real unit, month or city list will ever hold. */
+private const val MAX_DROPDOWN_OPTIONS = 1000
+
+/**
+ * Dropdown that still lets the user type a value that is not on the list -
+ * there is no list of Indian cities that is ever complete enough to block a
+ * registration on.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SearchableDropdownField(
+    label: String,
+    value: String,
+    options: List<String>,
+    onValueChange: (String) -> Unit,
+    allowFreeText: Boolean = true,
+    testTag: String = ""
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    /*
+     * What the list is narrowed to.
+     *
+     * The typed value is a search term only while the field is a free-text one
+     * *and* what is in it is not already one of the options. A pick-only field
+     * (unit number, billing month, unit type) treats its value as a selection,
+     * so choosing "August 2026" or "2 BHK" must never leave that the only row
+     * the list will show afterwards.
+     */
+    val matches = remember(value, options, allowFreeText) {
+        val typed = value.trim()
+        val isSelection = options.any { it.equals(typed, ignoreCase = true) }
+        if (!allowFreeText || typed.isBlank() || isSelection) {
+            options
+        } else {
+            options.filter { it.contains(typed, ignoreCase = true) }
+        }
+    }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded && matches.isNotEmpty(),
+        onExpandedChange = { expanded = !expanded },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { typed -> if (allowFreeText) { onValueChange(typed); expanded = true } },
+            readOnly = !allowFreeText,
+            label = { Text(label) },
+            supportingText = if (allowFreeText && options.isEmpty()) {
+                { Text("Type it in - no list available for this selection.") }
+            } else null,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            singleLine = true,
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+                .then(if (testTag.isBlank()) Modifier else Modifier.testTag(testTag))
+        )
+        ExposedDropdownMenu(
+            expanded = expanded && matches.isNotEmpty(),
+            onDismissRequest = { expanded = false }
+        ) {
+            // Every option is listed - a society with 200 units has to be able
+            // to reach its last unit - and the menu scrolls when it has to.
+            matches.take(MAX_DROPDOWN_OPTIONS).forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        onValueChange(option)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Picks a month and a year and hands back one "April 2026" string - the format
+ * every bill month in the app is written in.
+ *
+ * Used for the society's billing start month, which is what every billing month
+ * list in the app is generated from.
+ */
+@Composable
+fun MonthYearPickerField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    supportingText: String? = null,
+    yearsBack: Int = 10,
+    yearsForward: Int = 1,
+    testTagPrefix: String = "month_year"
+) {
+    val currentYear = remember {
+        java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+    }
+    val parts = remember(value) { value.trim().split(" ").filter { it.isNotBlank() } }
+    val month = parts.getOrNull(0).orEmpty()
+    val year = parts.getOrNull(1).orEmpty()
+    val years = remember(currentYear) {
+        ((currentYear - yearsBack)..(currentYear + yearsForward)).map { it.toString() }.reversed()
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(modifier = Modifier.weight(1.3f)) {
+                SearchableDropdownField(
+                    label = "Month",
+                    value = month,
+                    options = MONTH_NAMES,
+                    onValueChange = { picked ->
+                        onValueChange("$picked ${year.ifBlank { currentYear.toString() }}")
+                    },
+                    allowFreeText = false,
+                    testTag = "${testTagPrefix}_month_dropdown"
+                )
+            }
+            Box(modifier = Modifier.weight(1f)) {
+                SearchableDropdownField(
+                    label = "Year",
+                    value = year,
+                    options = years,
+                    onValueChange = { picked ->
+                        onValueChange("${month.ifBlank { MONTH_NAMES.first() }} $picked")
+                    },
+                    allowFreeText = false,
+                    testTag = "${testTagPrefix}_year_dropdown"
+                )
+            }
+        }
+        if (supportingText != null) {
+            Text(
+                text = supportingText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+    }
+}
+
+/** English month names, the same spelling every bill month is stored with. */
+val MONTH_NAMES: List<String> = listOf(
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+)

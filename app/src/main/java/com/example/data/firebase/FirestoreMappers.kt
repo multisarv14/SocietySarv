@@ -10,16 +10,20 @@ import com.example.data.entity.MaintenanceBill
 import com.example.data.entity.NonFeeRevenue
 import com.example.data.entity.Notice
 import com.example.data.entity.NoticeCategory
+import com.example.data.entity.ParkingType
 import com.example.data.entity.PaymentMode
 import com.example.data.entity.PaymentStatus
 import com.example.data.entity.Resident
 import com.example.data.entity.RevenueSource
 import com.example.data.entity.SocietyInfo
 import com.example.data.entity.TicketStatus
+import com.example.data.entity.UnitTypeConfig
 import com.example.data.entity.UserRole
 import com.example.data.entity.VisitorLog
 import com.example.data.entity.VisitorPurpose
 import com.example.data.entity.VisitorStatus
+import com.example.data.entity.WingPlan
+import com.example.data.entity.WingUnitCount
 import com.google.firebase.firestore.DocumentSnapshot
 
 /*
@@ -45,6 +49,29 @@ private fun DocumentSnapshot.bool(field: String, fallback: Boolean = false): Boo
 private inline fun <reified T : Enum<T>> DocumentSnapshot.enum(field: String, fallback: T): T =
     getString(field)?.let { raw -> runCatching { enumValueOf<T>(raw) }.getOrNull() } ?: fallback
 
+private fun DocumentSnapshot.strList(field: String): List<String> =
+    (get(field) as? List<*>).orEmpty().mapNotNull { it as? String }
+
+@Suppress("UNCHECKED_CAST")
+private fun DocumentSnapshot.mapList(field: String): List<Map<String, Any?>> =
+    (get(field) as? List<*>).orEmpty().mapNotNull { it as? Map<String, Any?> }
+
+private fun Map<String, Any?>.str(key: String, fallback: String = ""): String =
+    this[key] as? String ?: fallback
+
+private fun Map<String, Any?>.num(key: String, fallback: Double = 0.0): Double =
+    (this[key] as? Number)?.toDouble() ?: fallback
+
+private fun Map<String, Any?>.int(key: String, fallback: Int = 0): Int =
+    (this[key] as? Number)?.toInt() ?: fallback
+
+private fun Map<String, Any?>.bool(key: String, fallback: Boolean = false): Boolean =
+    this[key] as? Boolean ?: fallback
+
+@Suppress("UNCHECKED_CAST")
+private fun Map<String, Any?>.mapList(key: String): List<Map<String, Any?>> =
+    (this[key] as? List<*>).orEmpty().mapNotNull { it as? Map<String, Any?> }
+
 // ------------------------------------------------------------------ society
 
 fun DocumentSnapshot.toSocietyInfo(): SocietyInfo = SocietyInfo(
@@ -59,6 +86,7 @@ fun DocumentSnapshot.toSocietyInfo(): SocietyInfo = SocietyInfo(
     bankAccountName = str("bankAccountName"),
     bankAccountNumber = str("bankAccountNumber"),
     ifscCode = str("ifscCode"),
+    upiId = str("upiId"),
     currentBalanceCash = num("currentBalanceCash"),
     currentBalanceBank = num("currentBalanceBank"),
     lateFeePercentPerMonth = num("lateFeePercentPerMonth", 2.0),
@@ -68,9 +96,47 @@ fun DocumentSnapshot.toSocietyInfo(): SocietyInfo = SocietyInfo(
     tariff3BHK = num("tariff3BHK", 3000.0),
     tariffPenthouse = num("tariffPenthouse", 4500.0),
     tariffShop = num("tariffShop", 3500.0),
+    waterChargesPercent = num("waterChargesPercent", 10.0),
     sinkingFundPercent = num("sinkingFundPercent", 5.0),
-    repairFundPercent = num("repairFundPercent", 5.0),
-    logoBase64 = str("logoBase64")
+    repairFundPercent = num("repairFundPercent", 20.0),
+    otherMaintenancePercent = num("otherMaintenancePercent", 65.0),
+    logoBase64 = str("logoBase64"),
+    country = str("country", "India"),
+    state = str("state"),
+    city = str("city"),
+    pinCode = str("pinCode"),
+    contactNumber = str("contactNumber"),
+    email = str("email"),
+    wingNames = strList("wingNames"),
+    wingPlans = mapList("wingPlans").map { raw ->
+        WingPlan(
+            name = raw.str("name"),
+            totalFloors = raw.int("totalFloors"),
+            unitCounts = raw.mapList("unitCounts")
+                .map { count -> WingUnitCount(count.str("unitType"), count.int("quantity")) }
+                .ifEmpty {
+                    /*
+                     * Wings written before unit quantities existed stored a
+                     * single type with a units-per-floor count instead. Fold
+                     * that into one entry so an older society still shows the
+                     * unit count it actually has.
+                     */
+                    val floors = raw.int("totalFloors") + if (raw.bool("hasGroundFloor")) 1 else 0
+                    val legacyTotal = floors * raw.int("unitsPerFloor")
+                    if (legacyTotal > 0) {
+                        listOf(WingUnitCount(raw.str("unitType"), legacyTotal))
+                    } else {
+                        emptyList()
+                    }
+                }
+        )
+    },
+    unitTypes = mapList("unitTypes").map { raw ->
+        UnitTypeConfig(name = raw.str("name"), monthlyTariff = raw.num("monthlyTariff"))
+    },
+    coveredParkingCount = int("coveredParkingCount"),
+    openParkingCount = int("openParkingCount"),
+    billingStartMonth = str("billingStartMonth")
 )
 
 fun SocietyInfo.toMap(): Map<String, Any?> = mapOf(
@@ -85,6 +151,7 @@ fun SocietyInfo.toMap(): Map<String, Any?> = mapOf(
     "bankAccountName" to bankAccountName,
     "bankAccountNumber" to bankAccountNumber,
     "ifscCode" to ifscCode,
+    "upiId" to upiId,
     "currentBalanceCash" to currentBalanceCash,
     "currentBalanceBank" to currentBalanceBank,
     "lateFeePercentPerMonth" to lateFeePercentPerMonth,
@@ -94,9 +161,33 @@ fun SocietyInfo.toMap(): Map<String, Any?> = mapOf(
     "tariff3BHK" to tariff3BHK,
     "tariffPenthouse" to tariffPenthouse,
     "tariffShop" to tariffShop,
+    "waterChargesPercent" to waterChargesPercent,
     "sinkingFundPercent" to sinkingFundPercent,
     "repairFundPercent" to repairFundPercent,
-    "logoBase64" to logoBase64
+    "otherMaintenancePercent" to otherMaintenancePercent,
+    "logoBase64" to logoBase64,
+    "country" to country,
+    "state" to state,
+    "city" to city,
+    "pinCode" to pinCode,
+    "contactNumber" to contactNumber,
+    "email" to email,
+    "wingNames" to wingNames,
+    "wingPlans" to wingPlans.map { plan ->
+        mapOf(
+            "name" to plan.name,
+            "totalFloors" to plan.totalFloors,
+            "unitCounts" to plan.unitCounts.map { count ->
+                mapOf("unitType" to count.unitType, "quantity" to count.quantity)
+            }
+        )
+    },
+    "unitTypes" to unitTypes.map { type ->
+        mapOf("name" to type.name, "monthlyTariff" to type.monthlyTariff)
+    },
+    "coveredParkingCount" to coveredParkingCount,
+    "openParkingCount" to openParkingCount,
+    "billingStartMonth" to billingStartMonth
 )
 
 // ----------------------------------------------------------------- resident
@@ -108,6 +199,8 @@ fun DocumentSnapshot.toResident(): Resident = Resident(
     wing = str("wing"),
     ownerName = str("ownerName"),
     tenantName = str("tenantName"),
+    tenantContact = str("tenantContact"),
+    rentAgreementBase64 = str("rentAgreementBase64"),
     contactNumber = str("contactNumber"),
     email = str("email"),
     role = enum("role", UserRole.RESIDENT),
@@ -118,11 +211,15 @@ fun DocumentSnapshot.toResident(): Resident = Resident(
     twoWheelerNumber = str("twoWheelerNumber"),
     fourWheelerNumber = str("fourWheelerNumber"),
     parkingSlot = str("parkingSlot"),
+    parkingType = enum("parkingType", ParkingType.NONE),
+    unitType = str("unitType"),
     flatType = enum("flatType", FlatType.TWO_BHK),
     squareFeet = int("squareFeet"),
     balanceDue = num("balanceDue"),
     isOwnerLiving = bool("isOwnerLiving", true),
-    photoBase64 = str("photoBase64")
+    photoBase64 = str("photoBase64"),
+    staffDesignation = str("staffDesignation"),
+    isActive = bool("isActive", true)
 )
 
 fun Resident.toMap(): Map<String, Any?> = mapOf(
@@ -132,6 +229,8 @@ fun Resident.toMap(): Map<String, Any?> = mapOf(
     "wing" to wing,
     "ownerName" to ownerName,
     "tenantName" to tenantName,
+    "tenantContact" to tenantContact,
+    "rentAgreementBase64" to rentAgreementBase64,
     "contactNumber" to contactNumber,
     "email" to email,
     "role" to role.name,
@@ -142,11 +241,15 @@ fun Resident.toMap(): Map<String, Any?> = mapOf(
     "twoWheelerNumber" to twoWheelerNumber,
     "fourWheelerNumber" to fourWheelerNumber,
     "parkingSlot" to parkingSlot,
+    "parkingType" to parkingType.name,
+    "unitType" to unitType,
     "flatType" to flatType.name,
     "squareFeet" to squareFeet,
     "balanceDue" to balanceDue,
     "isOwnerLiving" to isOwnerLiving,
-    "photoBase64" to photoBase64
+    "photoBase64" to photoBase64,
+    "staffDesignation" to staffDesignation,
+    "isActive" to isActive
 )
 
 // --------------------------------------------------------- maintenance bill
@@ -357,7 +460,8 @@ fun DocumentSnapshot.toEmergencyContact(): EmergencyContact = EmergencyContact(
     titleMr = str("titleMr"),
     name = str("name"),
     phoneNumber = str("phoneNumber"),
-    category = str("category")
+    category = str("category"),
+    isActive = bool("isActive", true)
 )
 
 fun EmergencyContact.toMap(): Map<String, Any?> = mapOf(
@@ -366,5 +470,6 @@ fun EmergencyContact.toMap(): Map<String, Any?> = mapOf(
     "titleMr" to titleMr,
     "name" to name,
     "phoneNumber" to phoneNumber,
-    "category" to category
+    "category" to category,
+    "isActive" to isActive
 )

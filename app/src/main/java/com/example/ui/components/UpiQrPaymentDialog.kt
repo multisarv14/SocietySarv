@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -60,6 +61,7 @@ import com.example.data.localization.AppStrings
 import com.example.ui.theme.SlateOutlineVariant
 import com.example.ui.theme.SlateSurfaceVariant
 import com.example.ui.theme.StatusOverdue
+import com.example.ui.theme.StatusOverdueBg
 import com.example.ui.theme.StatusPaid
 import com.example.ui.theme.TealPrimary
 import com.example.ui.theme.TealPrimaryContainer
@@ -176,7 +178,10 @@ fun UpiQrPaymentDialog(
 
     val dueAmount = (bill.totalAmount - bill.amountPaid).coerceAtLeast(0.0)
     val societyName = society?.name ?: "Housing Society"
-    val societyVpa = "society.${society?.societyCode?.lowercase() ?: "shivneri"}@sbi"
+    // The society's real UPI id. Nothing is invented here - a QR built from a
+    // made-up address takes the member's money nowhere.
+    val societyVpa = society?.upiId.orEmpty().trim()
+    val hasUpiId = societyVpa.isNotBlank()
     val transactionNote = "Maintenance Bill ${bill.flatNumber} ${bill.billMonth}"
 
     val upiUri = remember(bill, society) {
@@ -193,6 +198,8 @@ fun UpiQrPaymentDialog(
     }
 
     AlertDialog(
+        modifier = DialogWidth,
+        properties = WideDialogProperties,
         onDismissRequest = onDismiss,
         title = {
             Row(
@@ -222,7 +229,7 @@ fun UpiQrPaymentDialog(
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                         )
                         Text(
-                            text = "Flat ${bill.flatNumber} • ${bill.billMonth}",
+                            text = "Unit ${bill.flatNumber} • ${bill.billMonth}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -235,30 +242,66 @@ fun UpiQrPaymentDialog(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // QR Code Frame Container
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.White,
-                    border = BorderStroke(2.dp, TealPrimary),
-                    shadowElevation = 4.dp,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                // No UPI id, no QR. Showing one built from a made-up address
+                // would send the member's money nowhere.
+                if (!hasUpiId) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = StatusOverdueBg,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                            .testTag("upi_not_configured")
                     ) {
-                        Image(
-                            bitmap = qrBitmap.asImageBitmap(),
-                            contentDescription = "UPI QR Code",
-                            modifier = Modifier.size(180.dp)
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Scan with any UPI App (GPay, PhonePe, Paytm, BHIM)",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.DarkGray,
-                            textAlign = TextAlign.Center
-                        )
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = if (language == AppLanguage.MARATHI) {
+                                    "संस्थेचा UPI आयडी अजून सेट केलेला नाही"
+                                } else {
+                                    "No UPI ID set for the society yet"
+                                },
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = StatusOverdue
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = if (language == AppLanguage.MARATHI) {
+                                    "अध्यक्षांना Society Profile मध्ये UPI आयडी भरायला सांगा. तोपर्यंत बँक तपशिलाने भरा."
+                                } else {
+                                    "Ask the Chairman to add the society's UPI ID under Society " +
+                                        "Profile. Until then, pay using the bank details."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    // QR Code Frame Container
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.White,
+                        border = BorderStroke(2.dp, TealPrimary),
+                        shadowElevation = 4.dp,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Image(
+                                bitmap = qrBitmap.asImageBitmap(),
+                                contentDescription = "UPI QR Code",
+                                modifier = Modifier.size(180.dp)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Scan with any UPI App (GPay, PhonePe, Paytm, BHIM)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.DarkGray,
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 }
 
@@ -356,21 +399,34 @@ fun UpiQrPaymentDialog(
                         )
                     }
 
+                    // Given the same weight as Pay in App. Squeezed into a
+                    // 48dp square it had no room for its own icon and rendered
+                    // as an empty outline.
                     OutlinedButton(
                         onClick = {
                             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
                                 putExtra(
                                     Intent.EXTRA_TEXT,
-                                    "Payment Request for ${bill.residentName} (${bill.flatNumber})\nAmount: ₹${dueAmount}\nUPI ID: $societyVpa\nNote: $transactionNote\nPay Link: $upiUri"
+                                    "Payment Request for ${bill.residentName} (${bill.flatNumber})\n" +
+                                        "Amount: ₹%,.2f\n".format(dueAmount) +
+                                        "UPI ID: $societyVpa\nNote: $transactionNote\nPay Link: $upiUri"
                                 )
                             }
                             context.startActivity(Intent.createChooser(shareIntent, "Share Payment QR Details"))
                         },
                         shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.size(48.dp)
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("share_upi_btn")
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = "Share", modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (language == AppLanguage.MARATHI) "शेअर करा" else "Share",
+                            style = MaterialTheme.typography.labelSmall
+                        )
                     }
                 }
             }

@@ -108,6 +108,17 @@ service cloud.firestore {
       }
     }
 
+    // Outgoing email, picked up by the Trigger Email extension. The app may
+    // queue a message and read back whether it was delivered, but never edit
+    // or remove one - a sent mail is a record.
+    match /mail/{mailId} {
+      allow read: if allowed();
+      allow create: if allowed()
+        && request.resource.data.to is list
+        && request.resource.data.message.subject is string;
+      allow update, delete: if false;
+    }
+
     // ---- Everything else is denied ---------------------------------------
     match /{document=**} {
       allow read, write: if false;

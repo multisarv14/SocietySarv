@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Receipts are written into cacheDir/receipts and shared from there, so no
+     other part of the app's storage is ever exposed to another app. -->
+<paths>
+    <cache-path name="receipts" path="receipts/" />
+</paths>

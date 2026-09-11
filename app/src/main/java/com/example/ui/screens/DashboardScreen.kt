@@ -33,7 +33,6 @@ import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Warning
@@ -72,6 +71,8 @@ import com.example.data.entity.SocietyInfo
 import com.example.data.entity.UserRole
 import com.example.data.entity.VisitorStatus
 import com.example.data.localization.AppLanguage
+import com.example.ui.components.DialogWidth
+import com.example.ui.components.WideDialogProperties
 import com.example.data.localization.AppStrings
 import com.example.ui.components.AnimatedSectionCard
 import com.example.ui.components.FinancialKpiCard
@@ -109,11 +110,27 @@ fun DashboardScreen(
     val bills by viewModel.bills.collectAsState()
     val expenses by viewModel.expenses.collectAsState()
 
+    /*
+     * The member's home is a quieter screen than the committee's.
+     *
+     * The gate feed is the guard's and the committee's business, the quick
+     * actions all lead to screens a member cannot open, and the maintenance
+     * card's "Details" button would send them to the Bills screen that is no
+     * longer part of their menu. None of it is shown to a member.
+     */
+    val isMember = currentUser?.role == UserRole.RESIDENT || currentUser?.role == UserRole.TENANT
+
+    // A member's maintenance card is about the unit they have selected in My
+    // Unit, so a member who owns several sees the one they are looking at.
+    val myUnits by viewModel.myUnits.collectAsState()
+
     var showExportDialog by remember { mutableStateOf(false) }
 
     if (showExportDialog) {
         val summaryText = viewModel.generateExportSummary()
         AlertDialog(
+            modifier = DialogWidth,
+            properties = WideDialogProperties,
             onDismissRequest = { showExportDialog = false },
             title = {
                 Text(
@@ -234,25 +251,41 @@ fun DashboardScreen(
             }
         }
 
-        // 2. MAINTENANCE STATUS DASHBOARD COMPONENT (NEW)
+        // 2. MAINTENANCE STATUS DASHBOARD COMPONENT
         item {
             AnimatedSectionCard(delayMillis = 100) {
                 MaintenanceStatusDashboard(
-                    bills = bills,
+                    /*
+                     * Every unit the member holds, added together.
+                     *
+                     * A member with two flats owes what both of them owe; a
+                     * home screen showing one of them understates it. The
+                     * unit-by-unit breakdown stays in My Unit.
+                     */
+                    bills = if (isMember) {
+                        val myUnitNumbers = myUnits.map { it.flatNumber.uppercase() }
+                            .ifEmpty { listOfNotNull(currentUser?.flatNumber?.uppercase()) }
+                        bills.filter { it.flatNumber.uppercase() in myUnitNumbers }
+                    } else {
+                        bills
+                    },
                     language = language,
+                    showActions = !isMember,
                     onNavigateToMaintenance = { onNavigate(NavDestination.MAINTENANCE) }
                 )
             }
         }
 
-        // 3. GATE ACTIVITY FEED COMPONENT (NEW)
-        item {
-            AnimatedSectionCard(delayMillis = 150) {
-                GateActivityFeed(
-                    visitors = visitors,
-                    language = language,
-                    onNavigateToGate = { onNavigate(NavDestination.GATE) }
-                )
+        // 3. GATE ACTIVITY FEED COMPONENT - committee and staff only.
+        if (!isMember) {
+            item {
+                AnimatedSectionCard(delayMillis = 150) {
+                    GateActivityFeed(
+                        visitors = visitors,
+                        language = language,
+                        onNavigateToGate = { onNavigate(NavDestination.GATE) }
+                    )
+                }
             }
         }
 
@@ -266,9 +299,13 @@ fun DashboardScreen(
                             AppLanguage.HINDI -> "वित्तीय डैशबोर्ड एवं तुलन पत्र"
                             AppLanguage.ENGLISH -> "Executive Financial Overview"
                         },
-                        subtitle = "FY 2026-27 • ${society?.name ?: ""}",
-                        actionLabel = AppStrings.get("export_pdf_text", language),
-                        onActionClick = { showExportDialog = true },
+                        subtitle = listOfNotNull(
+                            society?.billingStartMonth?.takeIf { it.isNotBlank() }?.let { "Billing from $it" },
+                            society?.name?.takeIf { it.isNotBlank() }
+                        ).joinToString(" • "),
+                        // Exports belong to the committee, not to a member.
+                        actionLabel = if (isMember) null else AppStrings.get("export_pdf_text", language),
+                        onActionClick = if (isMember) null else ({ showExportDialog = true }),
                         actionTestTag = "dashboard_export_btn"
                     )
 
@@ -321,8 +358,9 @@ fun DashboardScreen(
             }
         }
 
-        // 5. Quick Action Hub
-        item {
+        // 5. Quick Action Hub - every action here opens a committee screen.
+        if (!isMember) {
+            item {
             AnimatedSectionCard(delayMillis = 250) {
                 Card(
                     shape = RoundedCornerShape(16.dp),
@@ -376,6 +414,7 @@ fun DashboardScreen(
                         }
                     }
                 }
+            }
             }
         }
 

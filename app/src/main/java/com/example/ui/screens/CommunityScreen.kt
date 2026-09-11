@@ -21,11 +21,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Emergency
@@ -46,6 +48,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -77,10 +80,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.entity.Complaint
 import com.example.data.entity.ComplaintCategory
+import com.example.data.entity.EMERGENCY_PHONE_DIGITS
 import com.example.data.entity.EmergencyContact
 import com.example.data.entity.Notice
 import com.example.data.entity.NoticeCategory
@@ -88,10 +93,13 @@ import com.example.data.entity.Resident
 import com.example.data.entity.TicketStatus
 import com.example.data.entity.UserRole
 import com.example.data.localization.AppLanguage
+import com.example.ui.components.DialogWidth
+import com.example.ui.components.WideDialogProperties
 import com.example.data.localization.AppStrings
 import com.example.ui.components.TicketStatusBadge
 import com.example.ui.theme.GoldTertiary
 import com.example.ui.theme.MintSecondary
+import com.example.ui.components.SearchableDropdownField
 import com.example.ui.theme.SlateOutlineVariant
 import com.example.ui.theme.SlateSurfaceVariant
 import com.example.ui.theme.StatusOverdue
@@ -155,8 +163,8 @@ fun CommunityScreen(
         when (selectedSubTab) {
             0 -> NoticeBoardView(viewModel = viewModel, currentUser = currentUser, language = language)
             1 -> HelpdeskView(viewModel = viewModel, currentUser = currentUser, language = language)
-            2 -> EmergencyDirectoryView(viewModel = viewModel, language = language)
-            3 -> VehicleDirectoryView(viewModel = viewModel, language = language)
+            2 -> EmergencyDirectoryView(viewModel = viewModel, currentUser = currentUser, language = language)
+            3 -> VehicleDirectoryView(viewModel = viewModel, currentUser = currentUser, language = language)
         }
     }
 }
@@ -236,7 +244,7 @@ fun NoticeBoardView(
                         text = if (language == AppLanguage.MARATHI)
                             "• शांतता वेळ: रात्री १० ते सकाळी ६\n• सदनिका अंतर्गत दुरुस्ती: सकाळी ९ ते संध्याकाळी ६ (रविवारी बंद)\n• भाडेकरू पोलीस व्हेरिफिकेशन व ना-हरकत अनिवार्य\n• पार्किंग जागेचा गैरवापर केल्यास प्रति दिन ₹५०० दंड"
                         else
-                            "• Silence Hours: 10:00 PM to 06:00 AM\n• Flat Renovation Works: 09:00 AM to 06:00 PM (No Sunday work)\n• Police Verification and Tenant NOC mandatory for sub-letting\n• Misuse of designated parking slot attracts ₹500/day fine",
+                            "• Silence Hours: 10:00 PM to 06:00 AM\n• Unit Renovation Works: 09:00 AM to 06:00 PM (No Sunday work)\n• Police Verification and Tenant NOC mandatory for sub-letting\n• Misuse of designated parking slot attracts ₹500/day fine",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -323,11 +331,79 @@ fun HelpdeskView(
     language: AppLanguage
 ) {
     val complaints by viewModel.complaints.collectAsState()
+    val myUnits by viewModel.myUnits.collectAsState()
+    val activeUnit by viewModel.activeUnit.collectAsState()
     var isFileComplaintOpen by remember { mutableStateOf(false) }
+    var showAllUnits by remember { mutableStateOf(false) }
+    var complaintBeingEdited by remember { mutableStateOf<Complaint?>(null) }
+    var complaintPendingDeletion by remember { mutableStateOf<Complaint?>(null) }
+
+    complaintBeingEdited?.let { complaint ->
+        EditComplaintDialog(
+            complaint = complaint,
+            language = language,
+            onDismiss = { complaintBeingEdited = null },
+            onSave = { category, description, onError ->
+                viewModel.editMyComplaint(complaint, category, description) { ok, message ->
+                    if (ok) {
+                        viewModel.showMessage(message)
+                        complaintBeingEdited = null
+                    } else {
+                        onError(message)
+                    }
+                }
+            }
+        )
+    }
+
+    complaintPendingDeletion?.let { complaint ->
+        AlertDialog(
+            modifier = DialogWidth,
+            properties = WideDialogProperties,
+            onDismissRequest = { complaintPendingDeletion = null },
+            title = {
+                Text(
+                    text = if (language == AppLanguage.MARATHI) "तक्रार मागे घ्यायची?" else "Withdraw this complaint?",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            text = {
+                Text(
+                    text = complaint.description,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteMyComplaint(complaint) { _, message -> viewModel.showMessage(message) }
+                        complaintPendingDeletion = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = StatusOverdue),
+                    modifier = Modifier.testTag("confirm_delete_complaint_btn")
+                ) {
+                    Text(if (language == AppLanguage.MARATHI) "मागे घ्या" else "Withdraw")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { complaintPendingDeletion = null }) {
+                    Text(AppStrings.get("cancel", language))
+                }
+            }
+        )
+    }
+
+    val activeUnitNumber = (activeUnit ?: currentUser)?.flatNumber.orEmpty()
+    val visibleComplaints = if (myUnits.size > 1 && !showAllUnits) {
+        complaints.filter { it.flatNumber.equals(activeUnitNumber, ignoreCase = true) }
+    } else {
+        complaints
+    }
 
     if (isFileComplaintOpen) {
         FileComplaintDialog(
-            currentUser = currentUser,
+            currentUser = activeUnit ?: currentUser,
+            myUnits = myUnits,
             language = language,
             onDismiss = { isFileComplaintOpen = false },
             onSubmit = { cat, desc, flat, name ->
@@ -356,7 +432,7 @@ fun HelpdeskView(
 
                 Button(
                     onClick = { isFileComplaintOpen = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = StatusOverdue),
+                    colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.testTag("file_complaint_btn")
                 ) {
@@ -367,7 +443,41 @@ fun HelpdeskView(
             }
         }
 
-        items(complaints) { complaint ->
+        // A member who owns several units can narrow the list to the one they
+        // are dealing with; the committee always sees every ticket.
+        if (myUnits.size > 1) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    FilterChip(
+                        selected = !showAllUnits,
+                        onClick = { showAllUnits = false },
+                        label = {
+                            Text(
+                                text = "${AppStrings.get("select_unit", language)}: $activeUnitNumber",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        },
+                        modifier = Modifier.testTag("helpdesk_filter_my_unit")
+                    )
+                    FilterChip(
+                        selected = showAllUnits,
+                        onClick = { showAllUnits = true },
+                        label = {
+                            Text(
+                                text = AppStrings.get("filter_all", language),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        },
+                        modifier = Modifier.testTag("helpdesk_filter_all")
+                    )
+                }
+            }
+        }
+
+        items(visibleComplaints) { complaint ->
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -410,6 +520,47 @@ fun HelpdeskView(
                         )
                     }
 
+                    /*
+                     * The member who raised it may correct or withdraw it, but
+                     * only while it is still open - once the committee has
+                     * picked it up, editing it underneath them would rewrite
+                     * what they are working from.
+                     */
+                    val isMine = myUnits.any { it.flatNumber.equals(complaint.flatNumber, ignoreCase = true) }
+                    if (isMine && complaint.status == TicketStatus.OPEN) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(
+                                onClick = { complaintBeingEdited = complaint },
+                                modifier = Modifier.testTag("edit_complaint_btn_${complaint.id}")
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = AppStrings.get("edit_profile", language),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = TealPrimary
+                                )
+                            }
+                            TextButton(
+                                onClick = { complaintPendingDeletion = complaint },
+                                modifier = Modifier.testTag("delete_complaint_btn_${complaint.id}")
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null, tint = StatusOverdue, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (language == AppLanguage.MARATHI) "मागे घ्या" else "Withdraw",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = StatusOverdue
+                                )
+                            }
+                        }
+                    }
+
                     // Admin resolution controls
                     if (currentUser?.role == UserRole.CHAIRMAN || currentUser?.role == UserRole.SECRETARY || currentUser?.role == UserRole.COMMITTEE) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -442,10 +593,35 @@ fun HelpdeskView(
 @Composable
 fun EmergencyDirectoryView(
     viewModel: SocietyViewModel,
+    currentUser: Resident?,
     language: AppLanguage
 ) {
-    val contacts by viewModel.emergencyContacts.collectAsState()
+    val allContacts by viewModel.emergencyContacts.collectAsState()
     val context = LocalContext.current
+    val canManage = currentUser?.role == UserRole.CHAIRMAN
+    var editing by remember { mutableStateOf<EmergencyContact?>(null) }
+
+    // Members get the numbers that are actually in service. The committee sees
+    // the inactive ones too, so they can be switched back on.
+    val contacts = if (canManage) allContacts else allContacts.filter { it.isActive }
+
+    editing?.let { contact ->
+        EmergencyContactDialog(
+            contact = contact,
+            language = language,
+            onDismiss = { editing = null },
+            onSave = { updated ->
+                viewModel.saveEmergencyContact(updated) { _, message -> viewModel.showMessage(message) }
+                editing = null
+            },
+            onDelete = if (contact.docId.isBlank()) null else {
+                {
+                    viewModel.deleteEmergencyContact(contact) { _, message -> viewModel.showMessage(message) }
+                    editing = null
+                }
+            }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -454,15 +630,36 @@ fun EmergencyDirectoryView(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
-            Text(
-                text = AppStrings.get("emergency_title", language),
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
-            Text(
-                text = if (language == AppLanguage.MARATHI) "१-टॅप त्वरित आपत्कालीन कॉल सेवा" else "1-Tap Direct Emergency Calling Services",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = AppStrings.get("emergency_title", language),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Text(
+                        text = if (language == AppLanguage.MARATHI) "१-टॅप त्वरित आपत्कालीन कॉल सेवा" else "1-Tap Direct Emergency Calling Services",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                // Only the Chairman can add or change these numbers.
+                if (canManage) {
+                    Button(
+                        onClick = { editing = EmergencyContact(titleEn = "", titleMr = "", name = "", phoneNumber = "", category = "Society") },
+                        colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.testTag("add_emergency_contact_btn")
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(AppStrings.get("add_emergency_contact", language), style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
             Spacer(modifier = Modifier.height(6.dp))
         }
 
@@ -511,15 +708,41 @@ fun EmergencyDirectoryView(
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
-                            Text(
-                                text = if (language == AppLanguage.MARATHI) contact.titleMr else contact.titleEn,
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = if (language == AppLanguage.MARATHI) contact.titleMr else contact.titleEn,
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                )
+                                // Only the committee ever sees this - members
+                                // are not shown inactive contacts at all.
+                                if (!contact.isActive) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(shape = RoundedCornerShape(6.dp), color = StatusOverdueBg) {
+                                        Text(
+                                            text = "Inactive",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = StatusOverdue,
+                                            modifier = Modifier
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                .testTag("emergency_inactive_chip")
+                                        )
+                                    }
+                                }
+                            }
                             Text(
                                 text = "${contact.name} • ${contact.phoneNumber}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+                    }
+
+                    if (canManage) {
+                        IconButton(
+                            onClick = { editing = contact },
+                            modifier = Modifier.testTag("edit_emergency_${contact.docId}")
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit contact", tint = TealPrimary)
                         }
                     }
 
@@ -542,10 +765,17 @@ fun EmergencyDirectoryView(
 @Composable
 fun VehicleDirectoryView(
     viewModel: SocietyViewModel,
+    currentUser: Resident?,
     language: AppLanguage
 ) {
-    val residents by viewModel.residents.collectAsState()
+    // Members only. A guard's or a sweeper's bay is not part of the residents'
+    // parking list.
+    val residents by viewModel.members.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
+
+    // A member sees who parks where, but not everybody's phone number - the
+    // committee and the gate keep that. Members can still see their own.
+    val isMember = currentUser?.role == UserRole.RESIDENT || currentUser?.role == UserRole.TENANT
 
     val filtered = residents.filter {
         it.parkingSlot.contains(searchQuery, ignoreCase = true) ||
@@ -603,15 +833,20 @@ fun VehicleDirectoryView(
                             Text(text = "🛵 2W: ${resident.twoWheelerNumber}", style = MaterialTheme.typography.bodySmall)
                         }
                     }
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = SlateSurfaceVariant
-                    ) {
-                        Text(
-                            text = "📞 ${resident.contactNumber}",
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
+                    val isOwnRow = resident.flatNumber.equals(currentUser?.flatNumber, ignoreCase = true)
+                    if (!isMember || isOwnRow) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = SlateSurfaceVariant
+                        ) {
+                            Text(
+                                text = "📞 ${resident.contactNumber}",
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    .testTag("parking_contact_${resident.flatNumber}")
+                            )
+                        }
                     }
                 }
             }
@@ -646,6 +881,8 @@ fun PostNoticeDialog(
     var isCatExpanded by remember { mutableStateOf(false) }
 
     AlertDialog(
+        modifier = DialogWidth,
+        properties = WideDialogProperties,
         onDismissRequest = onDismiss,
         title = {
             Text(
@@ -735,22 +972,134 @@ fun PostNoticeDialog(
     )
 }
 
+/** A member correcting the complaint they raised, while it is still open. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditComplaintDialog(
+    complaint: Complaint,
+    language: AppLanguage,
+    onDismiss: () -> Unit,
+    onSave: (
+        category: ComplaintCategory,
+        description: String,
+        onError: (String) -> Unit
+    ) -> Unit
+) {
+    var selectedCat by remember(complaint) { mutableStateOf(complaint.category) }
+    var desc by remember(complaint) { mutableStateOf(complaint.description) }
+    var isCatExpanded by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        modifier = DialogWidth,
+        properties = WideDialogProperties,
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(
+                    text = if (language == AppLanguage.MARATHI) "तक्रार संपादित करा" else "Edit Complaint",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+                Text(
+                    text = "${complaint.flatNumber} • ${complaint.filedDate}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TealPrimary
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ExposedDropdownMenuBox(
+                    expanded = isCatExpanded,
+                    onExpandedChange = { isCatExpanded = !isCatExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = if (language == AppLanguage.MARATHI) selectedCat.labelMr else selectedCat.labelEn,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Issue Type (तक्रार प्रकार)") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isCatExpanded) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = isCatExpanded,
+                        onDismissRequest = { isCatExpanded = false }
+                    ) {
+                        ComplaintCategory.entries.forEach { cat ->
+                            DropdownMenuItem(
+                                text = { Text(if (language == AppLanguage.MARATHI) cat.labelMr else cat.labelEn) },
+                                onClick = { selectedCat = cat; isCatExpanded = false }
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = desc,
+                    onValueChange = { desc = it; error = null },
+                    label = { Text("Complaint Details (तपशील)") },
+                    minLines = 3,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("edit_complaint_desc_input")
+                )
+
+                error?.let {
+                    Text(text = it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(selectedCat, desc) { message -> error = message } },
+                colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                modifier = Modifier.testTag("save_complaint_btn")
+            ) {
+                Text(AppStrings.get("save", language))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(AppStrings.get("cancel", language))
+            }
+        }
+    )
+}
+
 // Dialog: File Complaint
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileComplaintDialog(
     currentUser: Resident?,
+    /**
+     * Every unit the signed-in member holds. One unit fills the form in and
+     * locks it; several turn the unit number into a picker, and the resident
+     * name follows whichever unit is chosen.
+     */
+    myUnits: List<Resident> = emptyList(),
     language: AppLanguage,
     onDismiss: () -> Unit,
     onSubmit: (cat: ComplaintCategory, desc: String, flat: String, name: String) -> Unit
 ) {
     var selectedCat by remember { mutableStateOf(ComplaintCategory.PLUMBING) }
     var desc by remember { mutableStateOf("") }
-    var flat by remember { mutableStateOf(currentUser?.flatNumber ?: "") }
-    var name by remember { mutableStateOf(currentUser?.ownerName ?: "Resident") }
+    // Filled in from the signed-in member - never typed by hand.
+    var flat by remember(currentUser) { mutableStateOf(currentUser?.flatNumber.orEmpty()) }
     var isCatExpanded by remember { mutableStateOf(false) }
 
+    val selectedUnit = myUnits.firstOrNull { it.flatNumber.equals(flat, ignoreCase = true) } ?: currentUser
+    val name = selectedUnit?.ownerName.orEmpty().ifBlank { "Resident" }
+
     AlertDialog(
+        modifier = DialogWidth,
+        properties = WideDialogProperties,
         onDismissRequest = onDismiss,
         title = {
             Text(
@@ -795,18 +1144,39 @@ fun FileComplaintDialog(
                     }
                 }
 
-                OutlinedTextField(
-                    value = flat,
-                    onValueChange = { flat = it },
-                    label = { Text(AppStrings.get("unit_number", language)) },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                // The unit and the name come from who is signed in. A member
+                // with more than one unit chooses which one this is about.
+                if (myUnits.size > 1) {
+                    SearchableDropdownField(
+                        label = AppStrings.get("unit_number", language),
+                        value = flat,
+                        options = myUnits.map { it.flatNumber },
+                        onValueChange = { flat = it },
+                        allowFreeText = false,
+                        testTag = "complaint_unit_dropdown"
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = flat,
+                        onValueChange = {},
+                        readOnly = true,
+                        enabled = false,
+                        label = { Text(AppStrings.get("unit_number", language)) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("complaint_unit_field")
+                    )
+                }
 
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it },
+                    onValueChange = {},
+                    readOnly = true,
+                    enabled = false,
                     label = { Text("Resident Name") },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("complaint_resident_name_field")
                 )
 
                 OutlinedTextField(
@@ -825,7 +1195,7 @@ fun FileComplaintDialog(
                         onSubmit(selectedCat, desc, flat, name)
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = StatusOverdue)
+                colors = ButtonDefaults.buttonColors(containerColor = TealPrimary)
             ) {
                 Text(AppStrings.get("submit", language))
             }
@@ -837,3 +1207,172 @@ fun FileComplaintDialog(
         }
     )
 }
+
+/** Add / edit / delete one emergency contact. Chairman-only entry point. */
+@Composable
+fun EmergencyContactDialog(
+    contact: EmergencyContact,
+    language: AppLanguage,
+    onDismiss: () -> Unit,
+    onSave: (EmergencyContact) -> Unit,
+    onDelete: (() -> Unit)?
+) {
+    var titleEn by remember { mutableStateOf(contact.titleEn) }
+    var titleMr by remember { mutableStateOf(contact.titleMr) }
+    var name by remember { mutableStateOf(contact.name) }
+    var phone by remember { mutableStateOf(contact.phoneNumber) }
+    var category by remember { mutableStateOf(contact.category) }
+    var isActive by remember { mutableStateOf(contact.isActive) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        modifier = DialogWidth,
+        properties = WideDialogProperties,
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = if (contact.docId.isBlank()) {
+                    AppStrings.get("add_emergency_contact", language)
+                } else {
+                    AppStrings.get("emergency_title", language)
+                },
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = titleEn,
+                    onValueChange = { titleEn = it },
+                    label = { Text("Title (English)") },
+                    placeholder = { Text("e.g. Society Plumber") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("emergency_title_input")
+                )
+                OutlinedTextField(
+                    value = titleMr,
+                    onValueChange = { titleMr = it },
+                    label = { Text("Title (मराठी)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Contact Person / Agency") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it.filter { ch -> ch.isDigit() || ch == '+' }.take(15) },
+                    label = { Text(AppStrings.get("mobile_number", language)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("emergency_phone_input")
+                )
+                SearchableDropdownField(
+                    label = "Category",
+                    value = category,
+                    options = EMERGENCY_CATEGORIES,
+                    onValueChange = { category = it }
+                )
+
+                // Inactive contacts stay on file for the committee but are not
+                // shown to members - a number that is out of service must not
+                // sit on an emergency list.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (isActive) "Active" else "Inactive",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = if (isActive) {
+                                "Shown to every member."
+                            } else {
+                                "Kept on file, hidden from members."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isActive,
+                        onCheckedChange = { isActive = it },
+                        modifier = Modifier.testTag("emergency_active_switch")
+                    )
+                }
+
+                error?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.testTag("emergency_error_text")
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = titleEn.isNotBlank() && phone.isNotBlank(),
+                onClick = {
+                    // An emergency number that cannot be dialled is worse than
+                    // none at all, so the shape is checked before it is saved.
+                    val digits = phone.filter { it.isDigit() }
+                    if (digits.length !in EMERGENCY_PHONE_DIGITS) {
+                        error = "Enter a valid phone number - 3 to 15 digits, " +
+                            "so short codes like 100 and full mobile numbers both work."
+                        return@Button
+                    }
+                    error = null
+                    onSave(
+                        contact.copy(
+                            titleEn = titleEn.trim(),
+                            titleMr = titleMr.trim().ifBlank { titleEn.trim() },
+                            name = name.trim(),
+                            phoneNumber = phone.trim(),
+                            category = category.trim().ifBlank { "Society" },
+                            isActive = isActive
+                        )
+                    )
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                modifier = Modifier.testTag("save_emergency_contact_btn")
+            ) {
+                Text(AppStrings.get("submit", language))
+            }
+        },
+        dismissButton = {
+            Row {
+                if (onDelete != null) {
+                    TextButton(onClick = onDelete) {
+                        Text(AppStrings.get("delete", language), color = StatusOverdue)
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(AppStrings.get("cancel", language))
+                }
+            }
+        }
+    )
+}
+
+private val EMERGENCY_CATEGORIES = listOf(
+    "Police", "Fire", "Ambulance", "Hospital", "Security", "Plumber",
+    "Electrician", "Lift Technician", "Water Tanker", "Society"
+)

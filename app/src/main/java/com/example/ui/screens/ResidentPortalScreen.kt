@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -63,6 +64,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.entity.ComplaintCategory
@@ -72,11 +74,21 @@ import com.example.data.entity.PaymentStatus
 import com.example.data.entity.Resident
 import com.example.data.entity.SocietyInfo
 import com.example.data.entity.VisitorPurpose
+import com.example.data.entity.VisitorStatus
+import com.example.data.entity.derivedStatus
+import com.example.data.entity.financialYearOf
+import com.example.data.entity.financialYears
+import com.example.data.entity.payableTotal
+import com.example.data.entity.pendingAmount
 import com.example.data.localization.AppLanguage
+import com.example.ui.components.DialogWidth
+import com.example.ui.components.WideDialogProperties
 import com.example.data.localization.AppStrings
 import com.example.ui.components.ReceiptDialog
+import com.example.ui.components.SearchableDropdownField
 import com.example.ui.components.SectionHeader
 import com.example.ui.components.StatusBadge
+import com.example.ui.components.VisitorStatusBadge
 import com.example.ui.components.TicketStatusBadge
 import com.example.ui.components.UpiQrPaymentDialog
 import com.example.ui.theme.MintSecondary
@@ -100,12 +112,54 @@ fun ResidentPortalScreen(
     val bills by viewModel.bills.collectAsState()
     val complaints by viewModel.complaints.collectAsState()
 
-    val myFlat = currentUser?.flatNumber ?: ""
-    val myBills = bills.filter { it.flatNumber == myFlat }
-    val myComplaints = complaints.filter { it.flatNumber == myFlat }
+    /*
+     * Everything on this screen belongs to one unit.
+     *
+     * A member with a single flat never notices; a member who owns several
+     * picks one from the selector below and the dues, the bills, the parking
+     * and the complaint form all follow that choice.
+     */
+    val myUnits by viewModel.myUnits.collectAsState()
+    val activeUnit by viewModel.activeUnit.collectAsState()
+    val unit = activeUnit ?: currentUser
+
+    val myFlat = unit?.flatNumber ?: ""
+    val unitBills = bills.filter { it.flatNumber.equals(myFlat, ignoreCase = true) }
+
+    /*
+     * Financial year filter.
+     *
+     * A member looking for last year's receipts needs a way back to it, so the
+     * years the society has billed in are offered and everything below - the
+     * month-wise table, the statements, the receipts - follows the choice.
+     */
+    val financialYears = remember(society, unitBills) {
+        (society.financialYears() + unitBills.map { financialYearOf(it.billMonth) })
+            .filter { it.isNotBlank() }
+            .distinct()
+    }
+    var selectedYear by remember(financialYears) {
+        mutableStateOf(financialYears.firstOrNull().orEmpty())
+    }
+    val myBills = if (selectedYear.isBlank()) {
+        unitBills
+    } else {
+        unitBills.filter { financialYearOf(it.billMonth) == selectedYear }
+    }
+
+    /*
+     * The gate log for this member's own units and nothing else - a member has
+     * no business seeing who called on their neighbours. A member who holds
+     * several units sees the callers at all of them.
+     */
+    val visitors by viewModel.visitors.collectAsState()
+    val myUnitNumbers = remember(myUnits, currentUser) {
+        myUnits.map { it.flatNumber.uppercase() }
+            .ifEmpty { listOfNotNull(currentUser?.flatNumber?.uppercase()) }
+    }
+    val myVisitors = visitors.filter { it.flatNumber.uppercase() in myUnitNumbers }
 
     var selectedBillForReceipt by remember { mutableStateOf<MaintenanceBill?>(null) }
-    var selectedBillForPayment by remember { mutableStateOf<MaintenanceBill?>(null) }
     var selectedBillForQr by remember { mutableStateOf<MaintenanceBill?>(null) }
     var isPasscodeGenOpen by remember { mutableStateOf(false) }
     var isFileComplaintOpen by remember { mutableStateOf(false) }
@@ -118,11 +172,9 @@ fun ResidentPortalScreen(
             society = society,
             language = language,
             onDismiss = { selectedBillForQr = null },
-            onPaymentRecorded = {
-                val b = selectedBillForQr!!
-                selectedBillForQr = null
-                selectedBillForPayment = b
-            }
+            // The committee receipts the payment once it lands; the member
+            // just closes the sheet.
+            onPaymentRecorded = { selectedBillForQr = null }
         )
     }
 
@@ -132,18 +184,6 @@ fun ResidentPortalScreen(
             society = society,
             language = language,
             onDismiss = { selectedBillForReceipt = null }
-        )
-    }
-
-    if (selectedBillForPayment != null) {
-        RecordPaymentDialog(
-            bill = selectedBillForPayment!!,
-            language = language,
-            onDismiss = { selectedBillForPayment = null },
-            onSubmit = { amount, mode, ref, date ->
-                viewModel.recordMaintenancePayment(selectedBillForPayment!!, amount, mode, ref, date)
-                selectedBillForPayment = null
-            }
         )
     }
 
@@ -163,6 +203,8 @@ fun ResidentPortalScreen(
 
     if (generatedPasscode != null) {
         AlertDialog(
+            modifier = DialogWidth,
+            properties = WideDialogProperties,
             onDismissRequest = { generatedPasscode = null },
             title = {
                 Text(
@@ -210,7 +252,8 @@ fun ResidentPortalScreen(
 
     if (isFileComplaintOpen) {
         FileComplaintDialog(
-            currentUser = currentUser,
+            currentUser = unit,
+            myUnits = myUnits,
             language = language,
             onDismiss = { isFileComplaintOpen = false },
             onSubmit = { cat, desc, flat, name ->
@@ -238,6 +281,42 @@ fun ResidentPortalScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // A member who owns more than one unit picks which one this screen is
+        // about; everything below follows the selection.
+        if (myUnits.size > 1) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, TealPrimary),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("unit_selector_card")
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            text = AppStrings.get("select_unit", language),
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "${myUnits.size} ${AppStrings.get("units_you_own", language)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        SearchableDropdownField(
+                            label = AppStrings.get("unit_number_label", language),
+                            value = myFlat,
+                            options = myUnits.map { it.flatNumber },
+                            onValueChange = { viewModel.selectUnit(it) },
+                            allowFreeText = false,
+                            testTag = "portal_unit_dropdown"
+                        )
+                    }
+                }
+            }
+        }
+
         // Resident Profile & Dues Card
         item {
             Card(
@@ -264,12 +343,12 @@ fun ResidentPortalScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = "${currentUser?.flatNumber ?: ""} • ${currentUser?.ownerName ?: "Member"}",
+                                    text = "${unit?.flatNumber ?: ""} • ${unit?.ownerName ?: "Member"}",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                     color = TealPrimary
                                 )
                                 Text(
-                                    text = "${currentUser?.flatType?.displayName ?: "2 BHK"} • Wing ${currentUser?.wing ?: "A"}",
+                                    text = "${unit?.flatType?.displayName ?: "2 BHK"} • Wing ${unit?.wing ?: "A"}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -283,6 +362,10 @@ fun ResidentPortalScreen(
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
+                    // Taken from the bills themselves so this can never disagree
+                    // with the month-wise table below it.
+                    val outstanding = myBills.sumOf { it.pendingAmount }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -294,27 +377,65 @@ fun ResidentPortalScreen(
                                 style = MaterialTheme.typography.labelMedium
                             )
                             Text(
-                                text = "₹%,.2f".format(currentUser?.balanceDue ?: 0.0),
+                                text = "₹%,.2f".format(outstanding),
                                 style = MaterialTheme.typography.headlineSmall.copy(
                                     fontWeight = FontWeight.Bold,
-                                    color = if ((currentUser?.balanceDue ?: 0.0) > 0) StatusOverdue else StatusPaid
-                                )
+                                    color = if (outstanding > 0.009) StatusOverdue else StatusPaid
+                                ),
+                                modifier = Modifier.testTag("portal_outstanding_amount")
                             )
                         }
 
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = if ((currentUser?.balanceDue ?: 0.0) > 0) StatusOverdue.copy(alpha = 0.15f) else StatusPaidBg
+                            color = if (outstanding > 0.009) StatusOverdue.copy(alpha = 0.15f) else StatusPaidBg
                         ) {
                             Text(
-                                text = if ((currentUser?.balanceDue ?: 0.0) > 0) AppStrings.get("status_unpaid", language) else AppStrings.get("status_paid", language),
+                                text = if (outstanding > 0.009) AppStrings.get("status_unpaid", language) else AppStrings.get("status_paid", language),
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = if ((currentUser?.balanceDue ?: 0.0) > 0) StatusOverdue else StatusPaid,
+                                color = if (outstanding > 0.009) StatusOverdue else StatusPaid,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                             )
                         }
                     }
                 }
+            }
+        }
+
+        if (financialYears.size > 1) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, SlateOutlineVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("portal_financial_year_card")
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        SearchableDropdownField(
+                            label = AppStrings.get("financial_year", language),
+                            value = selectedYear,
+                            options = financialYears,
+                            onValueChange = { selectedYear = it },
+                            allowFreeText = false,
+                            testTag = "portal_financial_year_dropdown"
+                        )
+                        Text(
+                            text = "${myBills.size} bill(s) in $selectedYear",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        // Month-wise billing for this unit: what was billed, what was paid,
+        // what is still due for the month, and the running outstanding.
+        if (myBills.isNotEmpty()) {
+            item {
+                UnitMonthlyBillingTable(bills = myBills, unitNumber = myFlat, language = language)
             }
         }
 
@@ -354,6 +475,130 @@ fun ResidentPortalScreen(
             }
         }
 
+        /*
+         * Visitors the gate logged against this unit.
+         *
+         * The passcode is shown here and nowhere else - it belongs to the
+         * member the visitor came to see, not to the whole society - and the
+         * member answers for anyone still waiting at the gate.
+         */
+        if (myVisitors.isNotEmpty()) {
+            item {
+                Text(
+                    text = AppStrings.get("gate_activity_log", language),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+
+            items(myVisitors) { visitor ->
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, SlateOutlineVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("portal_visitor_${visitor.id}")
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = visitor.visitorName,
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Text(
+                                    text = "${visitor.flatNumber} • ${visitor.purpose.labelEn} • ${visitor.entryTime}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (visitor.vehicleNumber.isNotBlank()) {
+                                    Text(
+                                        text = "🚗 ${visitor.vehicleNumber}",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                            VisitorStatusBadge(status = visitor.status, language = language)
+                        }
+
+                        if (visitor.passcode.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = TealPrimaryContainer,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text(
+                                        text = if (language == AppLanguage.MARATHI) "पासकोड" else "Passcode",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TealPrimary
+                                    )
+                                    Text(
+                                        text = visitor.passcode,
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 3.sp
+                                        ),
+                                        color = TealPrimary,
+                                        modifier = Modifier.testTag("portal_visitor_passcode_${visitor.id}")
+                                    )
+                                }
+                            }
+                        }
+
+                        // Only somebody still at the gate needs answering.
+                        if (visitor.status == VisitorStatus.PRE_APPROVED ||
+                            visitor.status == VisitorStatus.INSIDE
+                        ) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        viewModel.answerVisitor(visitor, isApproved = true) { _, message ->
+                                            viewModel.showMessage(message)
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("portal_approve_visitor_${visitor.id}")
+                                ) {
+                                    Text(
+                                        text = if (language == AppLanguage.MARATHI) "परवानगी द्या" else "Approve",
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        viewModel.answerVisitor(visitor, isApproved = false) { _, message ->
+                                            viewModel.showMessage(message)
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, StatusOverdue),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("portal_reject_visitor_${visitor.id}")
+                                ) {
+                                    Text(
+                                        text = if (language == AppLanguage.MARATHI) "नकार" else "Deny",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = StatusOverdue
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // My Vehicles & Parking Slot
         item {
             Card(
@@ -364,20 +609,24 @@ fun ResidentPortalScreen(
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = if (language == AppLanguage.MARATHI) "माझी वाहने व पार्किंग जागा" else "My Parking & Vehicles",
+                        text = if (language == AppLanguage.MARATHI) {
+                            "$myFlat - वाहने व पार्किंग जागा"
+                        } else {
+                            "$myFlat - Parking & Vehicles"
+                        },
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "🅿️ Allocated Slot: ${currentUser?.parkingSlot?.ifBlank { "P-12" }}",
+                        text = "🅿️ Allocated Slot: ${unit?.parkingSlot?.ifBlank { "Not allotted" } ?: "Not allotted"}",
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                         color = TealPrimary
                     )
-                    if (currentUser?.fourWheelerNumber?.isNotBlank() == true) {
-                        Text(text = "🚗 4W Car: ${currentUser.fourWheelerNumber}", style = MaterialTheme.typography.bodySmall)
+                    if (unit?.fourWheelerNumber?.isNotBlank() == true) {
+                        Text(text = "🚗 4W Car: ${unit.fourWheelerNumber}", style = MaterialTheme.typography.bodySmall)
                     }
-                    if (currentUser?.twoWheelerNumber?.isNotBlank() == true) {
-                        Text(text = "🛵 2W Scooter: ${currentUser.twoWheelerNumber}", style = MaterialTheme.typography.bodySmall)
+                    if (unit?.twoWheelerNumber?.isNotBlank() == true) {
+                        Text(text = "🛵 2W Scooter: ${unit.twoWheelerNumber}", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -386,7 +635,11 @@ fun ResidentPortalScreen(
         // My Maintenance Bills
         item {
             Text(
-                text = if (language == AppLanguage.MARATHI) "माझी देखभाल बिले व पावत्या" else "My Maintenance Statements",
+                text = if (language == AppLanguage.MARATHI) {
+                    "$myFlat - देखभाल बिले व पावत्या"
+                } else {
+                    "$myFlat - Maintenance Statements"
+                },
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
             )
         }
@@ -409,8 +662,10 @@ fun ResidentPortalScreen(
                             Text(text = "Due: ${bill.dueDate}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            Text(text = "₹%,.2f".format(bill.totalAmount), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                            StatusBadge(status = bill.status, language = language)
+                            // Derived, not stored, so an edited bill never
+                            // disagrees with the month-wise table above.
+                            Text(text = "₹%,.2f".format(bill.payableTotal), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                            StatusBadge(status = bill.derivedStatus, language = language)
                         }
                     }
 
@@ -420,7 +675,13 @@ fun ResidentPortalScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        if (bill.status != PaymentStatus.PAID) {
+                        /*
+                         * A member pays, they do not record payments. Marking a
+                         * bill settled is the committee's entry to make, so the
+                         * member is offered the QR to pay with and, once the
+                         * committee has receipted it, the receipt to keep.
+                         */
+                        if (bill.derivedStatus != PaymentStatus.PAID) {
                             OutlinedButton(
                                 onClick = { selectedBillForQr = bill },
                                 shape = RoundedCornerShape(8.dp),
@@ -429,23 +690,15 @@ fun ResidentPortalScreen(
                             ) {
                                 Icon(Icons.Default.QrCode, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(if (language == AppLanguage.MARATHI) "QR कोड" else "QR Pay", style = MaterialTheme.typography.labelSmall, color = TealPrimary)
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Button(
-                                onClick = { selectedBillForPayment = bill },
-                                colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(AppStrings.get("record_payment", language), style = MaterialTheme.typography.labelSmall)
+                                Text(if (language == AppLanguage.MARATHI) "QR ने भरा" else "Pay by QR", style = MaterialTheme.typography.labelSmall, color = TealPrimary)
                             }
                         } else {
+                            // Only a settled bill has a receipt behind it.
                             OutlinedButton(
                                 onClick = { selectedBillForReceipt = bill },
                                 shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, TealPrimary)
+                                border = BorderStroke(1.dp, TealPrimary),
+                                modifier = Modifier.testTag("portal_receipt_btn_${bill.flatNumber}")
                             ) {
                                 Icon(Icons.Default.Receipt, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
@@ -458,6 +711,145 @@ fun ResidentPortalScreen(
         }
     }
 }
+
+/**
+ * One unit's billing, month by month.
+ *
+ *  - Total Bill    what was charged for that month, late fee included
+ *  - Paid Amount   what has been collected against it
+ *  - Due Amount    what is still owed for that month alone
+ *  - Pending       everything still owed up to and including that month
+ *
+ * Due is the month on its own; Pending is the running arrear, which is the
+ * number a member is actually chased for.
+ */
+@Composable
+fun UnitMonthlyBillingTable(
+    bills: List<MaintenanceBill>,
+    unitNumber: String,
+    language: AppLanguage,
+    modifier: Modifier = Modifier
+) {
+    val ordered = remember(bills) { bills.sortedBy { portalMonthKey(it.billMonth) } }
+
+    // Running arrear: each month carries forward everything left before it.
+    val rows = remember(ordered) {
+        var running = 0.0
+        ordered.map { bill ->
+            running += bill.pendingAmount
+            bill to running
+        }
+    }
+
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, SlateOutlineVariant),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("unit_monthly_billing_table")
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = if (language == AppLanguage.MARATHI) {
+                    "$unitNumber - महिनानिहाय बिल तपशील"
+                } else {
+                    "$unitNumber - Month-wise Billing"
+                },
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(TealPrimaryContainer, RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                    .padding(horizontal = 6.dp, vertical = 6.dp)
+            ) {
+                PortalCell("Month", weight = 1.9f, bold = true)
+                PortalCell("Total Bill", weight = 1.4f, bold = true, end = true)
+                PortalCell("Paid", weight = 1.2f, bold = true, end = true)
+                PortalCell("Due", weight = 1.2f, bold = true, end = true)
+                PortalCell("Pending", weight = 1.3f, bold = true, end = true)
+            }
+
+            rows.forEach { (bill, running) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp, vertical = 7.dp)
+                        .testTag("portal_bill_row_${bill.billMonth}")
+                ) {
+                    PortalCell(bill.billMonth, weight = 1.9f)
+                    PortalCell("%,.0f".format(bill.payableTotal), weight = 1.4f, end = true)
+                    PortalCell(
+                        "%,.0f".format(bill.amountPaid),
+                        weight = 1.2f,
+                        end = true,
+                        colour = StatusPaid
+                    )
+                    PortalCell(
+                        "%,.0f".format(bill.pendingAmount),
+                        weight = 1.2f,
+                        end = true,
+                        colour = if (bill.pendingAmount > 0.009) StatusOverdue else StatusPaid
+                    )
+                    PortalCell(
+                        "%,.0f".format(running),
+                        weight = 1.3f,
+                        end = true,
+                        bold = true,
+                        colour = if (running > 0.009) StatusOverdue else StatusPaid
+                    )
+                }
+                HorizontalDivider(color = SlateOutlineVariant)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 8.dp)
+            ) {
+                PortalCell("Total", weight = 1.9f, bold = true)
+                PortalCell("%,.0f".format(ordered.sumOf { it.payableTotal }), weight = 1.4f, bold = true, end = true)
+                PortalCell("%,.0f".format(ordered.sumOf { it.amountPaid }), weight = 1.2f, bold = true, end = true)
+                PortalCell("%,.0f".format(ordered.sumOf { it.pendingAmount }), weight = 1.2f, bold = true, end = true)
+                PortalCell(
+                    "%,.0f".format(rows.lastOrNull()?.second ?: 0.0),
+                    weight = 1.3f,
+                    bold = true,
+                    end = true,
+                    colour = if ((rows.lastOrNull()?.second ?: 0.0) > 0.009) StatusOverdue else StatusPaid
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RowScope.PortalCell(
+    text: String,
+    weight: Float,
+    bold: Boolean = false,
+    end: Boolean = false,
+    colour: Color = Color.Unspecified
+) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall.copy(
+            fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal
+        ),
+        color = colour,
+        maxLines = 1,
+        textAlign = if (end) TextAlign.End else TextAlign.Start,
+        modifier = Modifier.weight(weight)
+    )
+}
+
+/** Chronological ordering for "August 2026" style month labels. */
+private fun portalMonthKey(billMonth: String): Long = runCatching {
+    java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale.ENGLISH).parse(billMonth)?.time ?: 0L
+}.getOrDefault(0L)
 
 // Dialog: Generate Passcode for visitor
 @OptIn(ExperimentalMaterial3Api::class)
@@ -474,6 +866,8 @@ fun GenerateVisitorPasscodeDialog(
     var isCatExpanded by remember { mutableStateOf(false) }
 
     AlertDialog(
+        modifier = DialogWidth,
+        properties = WideDialogProperties,
         onDismissRequest = onDismiss,
         title = {
             Text(
@@ -563,6 +957,8 @@ fun ChangePinDialog(
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
+        modifier = DialogWidth,
+        properties = WideDialogProperties,
         onDismissRequest = onDismiss,
         title = {
             Text(

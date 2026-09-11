@@ -84,6 +84,8 @@ import com.example.data.entity.VisitorLog
 import com.example.data.entity.VisitorPurpose
 import com.example.data.entity.VisitorStatus
 import com.example.data.localization.AppLanguage
+import com.example.ui.components.DialogWidth
+import com.example.ui.components.WideDialogProperties
 import com.example.data.localization.AppStrings
 import com.example.ui.components.VisitorStatusBadge
 import com.example.ui.theme.MintSecondary
@@ -343,7 +345,7 @@ fun LiveGateTerminalView(
                                             .size(36.dp)
                                             .background(TealPrimaryContainer, CircleShape)
                                     ) {
-                                        Icon(Icons.Default.Phone, contentDescription = "Call Flat", tint = TealPrimary, modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Default.Phone, contentDescription = "Call Unit", tint = TealPrimary, modifier = Modifier.size(18.dp))
                                     }
                                 }
 
@@ -456,6 +458,8 @@ fun CheckInVisitorDialog(
     var isPurposeExpanded by remember { mutableStateOf(false) }
 
     AlertDialog(
+        modifier = DialogWidth,
+        properties = WideDialogProperties,
         onDismissRequest = onDismiss,
         title = {
             Text(
@@ -486,7 +490,7 @@ fun CheckInVisitorDialog(
                 OutlinedTextField(
                     value = flat,
                     onValueChange = { flat = it },
-                    label = { Text("Visiting Flat (फ्लॅट क्र.)") },
+                    label = { Text("Visiting Unit (सदनिका क्र.)") },
                     placeholder = { Text("e.g. A-101") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -563,6 +567,8 @@ fun VerifyPasscodeDialog(
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
+        modifier = DialogWidth,
+        properties = WideDialogProperties,
         onDismissRequest = onDismiss,
         title = {
             Text(

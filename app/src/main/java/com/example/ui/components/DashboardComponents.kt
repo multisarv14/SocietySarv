@@ -56,6 +56,9 @@ import com.example.data.entity.PaymentStatus
 import com.example.data.entity.VisitorLog
 import com.example.data.entity.VisitorPurpose
 import com.example.data.entity.VisitorStatus
+import com.example.data.entity.derivedStatus
+import com.example.data.entity.payableTotal
+import com.example.data.entity.pendingAmount
 import com.example.data.localization.AppLanguage
 import com.example.data.localization.AppStrings
 import com.example.ui.theme.GoogleAccentBlue
@@ -108,13 +111,20 @@ fun MaintenanceStatusDashboard(
     bills: List<MaintenanceBill>,
     language: AppLanguage,
     onNavigateToMaintenance: () -> Unit,
+    /**
+     * False on a member's home: the Details button opens the committee's Bills
+     * screen, which is not part of a member's menu, so it is left off.
+     */
+    showActions: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    val totalBilled = bills.sumOf { it.totalAmount }
+    // Derived from the line items, so an edited bill is reflected here without
+    // depending on the total that happened to be stored on the document.
+    val totalBilled = bills.sumOf { it.payableTotal }
     val totalCollected = bills.sumOf { it.amountPaid }
-    val totalPending = (totalBilled - totalCollected).coerceAtLeast(0.0)
-    val paidCount = bills.count { it.status == PaymentStatus.PAID }
-    val pendingCount = bills.count { it.status != PaymentStatus.PAID }
+    val totalPending = bills.sumOf { it.pendingAmount }
+    val paidCount = bills.count { it.derivedStatus == PaymentStatus.PAID }
+    val pendingCount = bills.count { it.derivedStatus != PaymentStatus.PAID }
     val progress = if (totalBilled > 0) (totalCollected / totalBilled).toFloat().coerceIn(0f, 1f) else 0f
 
     Card(
@@ -156,36 +166,46 @@ fun MaintenanceStatusDashboard(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "${bills.size} ${if (language == AppLanguage.MARATHI) "नोंदणीकृत सदनिका" else if (language == AppLanguage.HINDI) "पंजीकृत फ्लैट" else "registered units"}",
+                            text = if (showActions) {
+                                "${bills.size} ${if (language == AppLanguage.MARATHI) "नोंदणीकृत सदनिका" else if (language == AppLanguage.HINDI) "पंजीकृत फ्लैट" else "registered units"}"
+                            } else {
+                                // A member's card covers every unit they hold,
+                                // so it says so rather than looking like one.
+                                val units = bills.map { it.flatNumber.uppercase() }.distinct().size
+                                "${bills.size} ${if (language == AppLanguage.MARATHI) "बिले" else if (language == AppLanguage.HINDI) "बिल" else "bills"}" +
+                                    if (units > 1) " • $units units" else ""
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = GoogleTealContainer,
-                    modifier = Modifier
-                        .clickable { onNavigateToMaintenance() }
-                        .testTag("view_maintenance_details_btn")
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                if (showActions) {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = GoogleTealContainer,
+                        modifier = Modifier
+                            .clickable { onNavigateToMaintenance() }
+                            .testTag("view_maintenance_details_btn")
                     ) {
-                        Text(
-                            text = if (language == AppLanguage.MARATHI) "सविस्तर" else if (language == AppLanguage.HINDI) "विवरण" else "Details",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = TealPrimary
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(
-                            imageVector = Icons.Default.ArrowForward,
-                            contentDescription = null,
-                            tint = TealPrimary,
-                            modifier = Modifier.size(12.dp)
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = if (language == AppLanguage.MARATHI) "सविस्तर" else if (language == AppLanguage.HINDI) "विवरण" else "Details",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = TealPrimary
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Default.ArrowForward,
+                                contentDescription = null,
+                                tint = TealPrimary,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -382,131 +402,36 @@ fun GateActivityFeed(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            if (visitors.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (language == AppLanguage.MARATHI) "कोणतीही अभ्यागत नोंद उपलब्ध नाही" else if (language == AppLanguage.HINDI) "कोई आगंतुक प्रविष्टि नहीं" else "No visitor logs recorded today",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    visitors.take(4).forEach { visitor ->
-                        VisitorFeedItem(visitor = visitor, language = language)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun VisitorFeedItem(
-    visitor: VisitorLog,
-    language: AppLanguage,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = SlateSurfaceVariant.copy(alpha = 0.6f),
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
+            /*
+             * The home screen carries a count, not the log itself. The entries
+             * live behind Terminal, so the dashboard stays a summary and the
+             * activity is read where it can be acted on.
+             */
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center
             ) {
-                // Purpose Icon Indicator
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(
-                            when (visitor.purpose) {
-                                VisitorPurpose.DELIVERY -> Color(0xFFFEF3C7)
-                                VisitorPurpose.CAB -> Color(0xFFE0F2FE)
-                                VisitorPurpose.SERVICE -> Color(0xFFF3E8FF)
-                                else -> GoogleTealContainer
-                            }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = when (visitor.purpose) {
-                            VisitorPurpose.DELIVERY -> Icons.Default.LocalShipping
-                            VisitorPurpose.CAB -> Icons.Default.DirectionsCar
-                            VisitorPurpose.SERVICE -> Icons.Default.Security
-                            else -> Icons.Default.Person
-                        },
-                        contentDescription = null,
-                        tint = when (visitor.purpose) {
-                            VisitorPurpose.DELIVERY -> GoogleWarningAmber
-                            VisitorPurpose.CAB -> GoogleAccentBlue
-                            VisitorPurpose.SERVICE -> Color(0xFF7C3AED)
-                            else -> TealPrimary
-                        },
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = visitor.visitorName,
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "→ ${visitor.flatNumber}",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = TealPrimary
-                        )
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.AccessTime,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text(
-                            text = visitor.entryTime,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 11.sp
-                        )
-                        if (visitor.vehicleNumber.isNotBlank()) {
-                            Text(
-                                text = " • ${visitor.vehicleNumber}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp
-                            )
+                Text(
+                    text = if (visitors.isEmpty()) {
+                        when (language) {
+                            AppLanguage.MARATHI -> "कोणतीही अभ्यागत नोंद उपलब्ध नाही"
+                            AppLanguage.HINDI -> "कोई आगंतुक प्रविष्टि नहीं"
+                            AppLanguage.ENGLISH -> "No visitor logs recorded today"
                         }
-                    }
-                }
+                    } else {
+                        when (language) {
+                            AppLanguage.MARATHI -> "${visitors.size} नोंदी - पाहण्यासाठी Terminal उघडा"
+                            AppLanguage.HINDI -> "${visitors.size} प्रविष्टियां - देखने के लिए Terminal खोलें"
+                            AppLanguage.ENGLISH -> "${visitors.size} entries - open Terminal to view them"
+                        }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("gate_feed_summary")
+                )
             }
-
-            // Small status badge
-            SmallVisitorBadge(status = visitor.status, language = language)
         }
     }
 }
