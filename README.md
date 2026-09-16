@@ -2,9 +2,9 @@
 <img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
 </div>
 
-# Run and deploy your AI Studio app
+# Society Sarv
 
-This contains everything you need to run your app locally.
+Society management app for residents, security teams, and committee members.
 
 View your app in AI Studio: https://ai.studio/apps/5ffd08c1-7da0-422d-a539-25b4241ec744
 
