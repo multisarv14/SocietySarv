@@ -6,9 +6,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,6 +33,7 @@ import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -577,26 +580,66 @@ fun ReceiptDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                /*
+                 * View, download, share.
+                 *
+                 * Download now writes into the phone's own Downloads folder
+                 * rather than the app's cache, and View opens the PDF in a
+                 * reader - between them that is what "the receipt is not
+                 * downloadable or viewable" was asking for.
+                 */
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = {
-                            val file = ReceiptPdf.generate(context, bill, society)
-                            isError = file == null
-                            status = if (file == null) {
-                                "Could not create the receipt PDF."
-                            } else {
-                                "Saved as ${file.name}"
-                            }
+                            val failure = ReceiptPdf.view(context, bill, society)
+                            isError = failure != null
+                            status = failure
                         },
                         shape = RoundedCornerShape(10.dp),
                         border = BorderStroke(1.dp, TealPrimary),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("receipt_view_btn")
+                    ) {
+                        Icon(
+                            Icons.Default.Visibility,
+                            contentDescription = null,
+                            tint = TealPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = AppStrings.get("view_receipt", language),
+                            color = TealPrimary,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val saved = ReceiptPdf.saveToDownloads(context, bill, society)
+                            isError = !saved.isSaved
+                            status = saved.message
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, TealPrimary),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                         modifier = Modifier
                             .weight(1f)
                             .testTag("receipt_pdf_btn")
                     ) {
-                        Icon(Icons.Default.PictureAsPdf, contentDescription = null, tint = TealPrimary)
+                        Icon(
+                            Icons.Default.PictureAsPdf,
+                            contentDescription = null,
+                            tint = TealPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(AppStrings.get("download_receipt", language), color = TealPrimary)
+                        Text(
+                            text = AppStrings.get("download_receipt", language),
+                            color = TealPrimary,
+                            style = MaterialTheme.typography.labelMedium
+                        )
                     }
                     Button(
                         onClick = {
@@ -606,13 +649,21 @@ fun ReceiptDialog(
                         },
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                         modifier = Modifier
                             .weight(1f)
                             .testTag("receipt_share_btn")
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = null)
+                        Icon(
+                            Icons.Default.Share,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(AppStrings.get("share_receipt", language))
+                        Text(
+                            text = AppStrings.get("share_receipt", language),
+                            style = MaterialTheme.typography.labelMedium
+                        )
                     }
                 }
 
@@ -653,15 +704,44 @@ fun ReceiptRow(label: String, value: String, isBold: Boolean = false) {
 }
 
 /**
- * How wide a dialog sits on the screen.
+ * How wide a dialog sits on the screen, and how far it keeps off the edges.
  *
  * Material's default leaves a lot of margin, which cramps the forms in this
  * app - month-wise tables, the bill sheet, the registration steps. Every dialog
  * pairs this with [WideDialogProperties] so they are all the same width.
+ *
+ * The `safeDrawing` padding is what keeps Cancel and Submit tappable. From
+ * Android 15 on, an app targeting SDK 35+ is edge to edge whether it asks to be
+ * or not, and `decorFitsSystemWindows` is ignored - so a dialog window is
+ * measured against the whole display and a long form pushes its own buttons
+ * down behind the navigation bar. Padding the dialog's own content by the safe
+ * area puts that back: the sheet is bounded by the space between the status bar
+ * and the gesture bar, Material's `weight(1f, fill = false)` on the text slot
+ * shrinks the scrolling body to fit, and the button row stays on screen. The
+ * inset also covers the keyboard, so a field near the foot of the form is still
+ * typed into in front of it.
+ *
+ * On Android 14 and below the decor view consumes these insets before the
+ * content sees them, so this reads as zero and the window keeps doing the job
+ * itself - no double margin.
+ *
+ * The 12dp on top of the inset is breathing room. Without it a form long enough
+ * to fill the screen ends with its buttons sitting directly on the navigation
+ * bar, which reads as clipped even though every pixel of it is on screen.
  */
-val DialogWidth: Modifier = Modifier.fillMaxWidth(0.96f)
+val DialogWidth: Modifier
+    @Composable get() = Modifier
+        .windowInsetsPadding(WindowInsets.safeDrawing)
+        .padding(vertical = 12.dp)
+        .fillMaxWidth(0.96f)
 
-/** Lets a dialog take [DialogWidth] instead of the platform's own width. */
+/**
+ * Lets a dialog take [DialogWidth] instead of the platform's own width.
+ *
+ * `decorFitsSystemWindows` stays at its default of true so that older versions
+ * of Android, which still honour it, go on insetting the window themselves.
+ * Newer ones ignore it, and [DialogWidth] insets the content instead.
+ */
 val WideDialogProperties: DialogProperties =
     DialogProperties(usePlatformDefaultWidth = false)
 

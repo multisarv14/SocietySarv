@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -164,6 +165,13 @@ fun SocietySarvApp(viewModel: SocietyViewModel = viewModel()) {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
+                    /*
+                     * The scaffold insets the content for the top and bottom
+                     * bars, but not for the keyboard - so a form near the
+                     * bottom of a tab (the gate check-in, the complaint box)
+                     * had its fields typed into from behind the keyboard.
+                     */
+                    .imePadding()
             ) {
                 when (selectedTab) {
                     NavDestination.DASHBOARD -> DashboardScreen(

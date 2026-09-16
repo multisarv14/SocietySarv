@@ -22,11 +22,19 @@ import com.example.data.entity.Resident
 import com.example.data.entity.RevenueSource
 import com.example.data.entity.SocietyInfo
 import com.example.data.entity.TicketStatus
+import com.example.data.entity.UnitDues
+import com.example.data.entity.allocatePayment
+import com.example.data.entity.billMonthKey
+import com.example.data.entity.oldestMonthFirst
+import com.example.data.entity.roundToPaise
+import com.example.data.entity.unitDues
 import com.example.data.entity.ParkingType
 import com.example.data.entity.UnitTypeConfig
 import com.example.data.entity.billingMonths
 import com.example.data.entity.derivedStatus
+import com.example.data.entity.isMember
 import com.example.data.entity.isStaff
+import com.example.data.entity.withProfileEdits
 import com.example.data.entity.monthlyTariffFor
 import com.example.data.entity.pendingAmount
 import com.example.data.entity.splitMaintenance
@@ -90,14 +98,21 @@ fun destinationsFor(role: UserRole): List<NavDestination> = when (role) {
         NavDestination.MAINTENANCE,
         NavDestination.COMMUNITY
     )
-    // Members can open Accounts, but only to look at the society's balance -
-    // see canEditAccounts. Their own bills live in My Unit, so the committee's
-    // Bills screen is not part of a member's menu at all.
+    /*
+     * My Unit leads, because it is what a member opens the app for: their own
+     * bills, their own dues, their own gate log. It is also where they land
+     * after signing in, so it being the first tab keeps the bar and the landing
+     * screen agreeing with each other.
+     *
+     * Members can open Accounts, but only to look at the society's balance -
+     * see canEditAccounts. Their own bills live in My Unit, so the committee's
+     * Bills screen is not part of a member's menu at all.
+     */
     UserRole.RESIDENT, UserRole.TENANT -> listOf(
+        NavDestination.RESIDENT_PORTAL,
         NavDestination.DASHBOARD,
         NavDestination.ACCOUNTS,
-        NavDestination.COMMUNITY,
-        NavDestination.RESIDENT_PORTAL
+        NavDestination.COMMUNITY
     )
     // Security team: the gate terminal, plus notices and complaints.
     UserRole.GUARD -> listOf(
@@ -163,6 +178,8 @@ data class SocietyRegistrationRequest(
     val bankAccount: String = "",
     val ifsc: String = "",
     val upiId: String = "",
+    /** The society's own payment QR image, when its bank issues one. */
+    val paymentQrBase64: String = "",
     val initialBankBalance: Double = 0.0,
     /** Month billing starts from, as "April 2026". */
     val billingStartMonth: String = "",
@@ -308,6 +325,29 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
         mine.sortedByDescending { it.flatNumber.equals(user.flatNumber, ignoreCase = true) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /**
+     * The complaints the signed-in user is allowed to see.
+     *
+     * A complaint is between the unit that raised it and the people who have to
+     * act on it. Unit 304's leaking bathroom is not Unit 202's business, and
+     * the list used to show it to them.
+     *
+     * So a member sees only tickets raised from their own units. Everyone else
+     * signed in - the committee who answer for every ticket, and the staff who
+     * are sent to fix them - sees the lot; the helpdesk is the whole of the
+     * maintenance crew's screen, and a crew that cannot see a complaint cannot
+     * be sent to it.
+     */
+    val visibleComplaints: StateFlow<List<Complaint>> =
+        combine(complaints, myUnits, currentUser) { all, units, user ->
+            val role = user?.role ?: return@combine emptyList()
+            if (role != UserRole.RESIDENT && role != UserRole.TENANT) return@combine all
+
+            val mine = units.map { it.flatNumber.uppercase() }
+                .ifEmpty { listOf(user.flatNumber.uppercase()) }
+            all.filter { it.flatNumber.uppercase() in mine }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     /** True when the member holds more than one unit and needs a unit picker. */
     val hasMultipleUnits: StateFlow<Boolean> = myUnits
         .map { it.size > 1 }
@@ -331,8 +371,8 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
 
     // Financial KPI Summary calculation
     val financialOverview: StateFlow<FinancialOverview> = combine(
-        bills, expenses, revenues, societyInfo
-    ) { billsList, expList, revList, socInfo ->
+        bills, expenses, revenues, societyInfo, residents
+    ) { billsList, expList, revList, socInfo, residentList ->
         // Every figure below comes off the bill's own line items rather than a
         // stored total, so editing a bill moves the dashboard with it.
         val maintenanceCollected = billsList.sumOf { it.amountPaid }
@@ -346,7 +386,7 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
         val paidCount = billsList.count { it.derivedStatus == PaymentStatus.PAID }
         val pendingCount = billsList.count { it.derivedStatus != PaymentStatus.PAID }
 
-        val treasury = socInfo.treasuryBalance(billsList, expList, revList)
+        val treasury = socInfo.treasuryBalance(billsList, expList, revList, residentList)
         val cashBal = treasury.cash
         val bankBal = treasury.bank
 
@@ -716,6 +756,7 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
                 bankAccountNumber = request.bankAccount.trim(),
                 ifscCode = request.ifsc.trim().uppercase(),
                 upiId = request.upiId.trim(),
+                paymentQrBase64 = request.paymentQrBase64,
                 currentBalanceCash = 0.0,
                 currentBalanceBank = request.initialBankBalance,
                 tariff1BHK = request.tariffFor("1 BHK", 1500.0),
@@ -949,6 +990,15 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Record Maintenance Collection
+    /**
+     * Receipts a payment against one bill.
+     *
+     * The bill takes only what it is owed; anything over that is not forced
+     * onto it but held as the unit's advance credit, which the next bill raised
+     * for the unit is settled from automatically. Overpaying used to leave a
+     * bill showing more collected than it ever charged, and the money had
+     * nowhere to go at the start of the next month.
+     */
     fun recordMaintenancePayment(
         bill: MaintenanceBill,
         amount: Double,
@@ -959,10 +1009,12 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
     ) {
         safeLaunch {
             val now = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date())
-            val receiptNo = "REC-${SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date())}-${Random.nextInt(1000, 9999)}"
+            val receiptNo = newReceiptNumber()
             // Settle against what the bill actually comes to (charges + late fee),
             // not a stored total that a later edit could have left stale.
-            val paidSoFar = bill.amountPaid + amount
+            val appliedToBill = roundToPaise(minOf(amount.coerceAtLeast(0.0), bill.pendingAmount))
+            val excess = roundToPaise(amount.coerceAtLeast(0.0) - appliedToBill)
+            val paidSoFar = roundToPaise(bill.amountPaid + appliedToBill)
             val updatedBill = bill.copy(
                 amountPaid = paidSoFar,
                 totalAmount = bill.payableTotal,
@@ -975,16 +1027,164 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
             )
             repository.updateBill(updatedBill)
 
-            // Update resident dues
+            // Update resident dues, and park any overpayment as advance credit.
             val res = repository.getResidentByFlat(bill.flatNumber)
             if (res != null) {
-                val newDue = (res.balanceDue - amount).coerceAtLeast(0.0)
-                repository.updateResident(res.copy(balanceDue = newDue))
+                repository.updateResident(
+                    res.copy(
+                        balanceDue = (res.balanceDue - appliedToBill).coerceAtLeast(0.0),
+                        advanceBalance = roundToPaise(res.advanceBalance + excess),
+                        advanceMode = if (excess > 0.009) mode else res.advanceMode
+                    )
+                )
             }
 
-            showMessage(if (_language.value == AppLanguage.MARATHI) "पावती क्र. $receiptNo यशस्वीरित्या तयार झाली!" else "Receipt #$receiptNo generated successfully!")
+            val carried = if (excess > 0.009) {
+                msg(
+                    " ₹%,.2f जास्तीची रक्कम पुढील बिलात वजा होईल.".format(excess),
+                    " ₹%,.2f अतिरिक्त राशि अगले बिल में समायोजित होगी।".format(excess),
+                    " ₹%,.2f extra carried forward to the next bill.".format(excess)
+                )
+            } else {
+                ""
+            }
+            showMessage(
+                msg(
+                    "पावती क्र. $receiptNo तयार झाली!$carried",
+                    "रसीद क्र. $receiptNo तैयार हुई!$carried",
+                    "Receipt #$receiptNo generated.$carried"
+                )
+            )
         }
     }
+
+    /**
+     * Receipts one payment against however many months it covers.
+     *
+     * A member who owes five months and hands over part of it should not cost
+     * the chairman five separate entries. The amount is spread over the unit's
+     * pending bills oldest month first, every bill it touches carries the same
+     * receipt number, whatever it does not reach stays pending, and anything
+     * left over becomes advance credit against the next bill.
+     */
+    fun recordBulkPayment(
+        flatNumber: String,
+        amount: Double,
+        mode: PaymentMode,
+        ref: String,
+        dateStr: String,
+        screenshotBase64: String = "",
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        if (!canEditAccounts) {
+            onResult(false, accountsReadOnlyMessage())
+            return
+        }
+        if (amount <= 0.0) {
+            onResult(false, msg(
+                "रक्कम शून्यापेक्षा जास्त असावी.",
+                "राशि शून्य से अधिक होनी चाहिए।",
+                "Enter an amount greater than zero."
+            ))
+            return
+        }
+        val pending = pendingBillsFor(flatNumber)
+        if (pending.isEmpty() && amount > 0.0) {
+            onResult(false, msg(
+                "$flatNumber ची सर्व बिले आधीच भरली आहेत.",
+                "$flatNumber के सभी बिल पहले ही भरे गए हैं।",
+                "$flatNumber has no pending bills to settle."
+            ))
+            return
+        }
+        safeLaunch {
+            val now = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date())
+            val receiptNo = newReceiptNumber()
+            val paidOn = dateStr.ifBlank { now }
+            val allocation = allocatePayment(pending, amount)
+
+            allocation.touched.forEach { line ->
+                val paidSoFar = roundToPaise(line.bill.amountPaid + line.applied)
+                repository.updateBill(
+                    line.bill.copy(
+                        amountPaid = paidSoFar,
+                        totalAmount = line.bill.payableTotal,
+                        status = if (line.isSettled) PaymentStatus.PAID else PaymentStatus.PARTIAL,
+                        paidDate = paidOn,
+                        paymentMode = mode,
+                        transactionRef = ref,
+                        receiptNumber = receiptNo,
+                        receiptImageBase64 = screenshotBase64
+                    )
+                )
+            }
+
+            val res = repository.getResidentByFlat(flatNumber)
+            if (res != null) {
+                repository.updateResident(
+                    res.copy(
+                        balanceDue = (res.balanceDue - allocation.applied).coerceAtLeast(0.0),
+                        advanceBalance = roundToPaise(res.advanceBalance + allocation.excess),
+                        advanceMode = if (allocation.excess > 0.009) mode else res.advanceMode
+                    )
+                )
+            }
+
+            val monthsCovered = allocation.touched.size
+            val stillOwed = roundToPaise(
+                allocation.allocations.sumOf { it.pendingAfter }
+            )
+            val tail = buildString {
+                if (stillOwed > 0.009) {
+                    append(
+                        msg(
+                            " ₹%,.2f अजून थकीत आहे.".format(stillOwed),
+                            " ₹%,.2f अब भी बकाया है।".format(stillOwed),
+                            " ₹%,.2f still pending.".format(stillOwed)
+                        )
+                    )
+                }
+                if (allocation.excess > 0.009) {
+                    append(
+                        msg(
+                            " ₹%,.2f पुढील बिलात वजा होईल.".format(allocation.excess),
+                            " ₹%,.2f अगले बिल में समायोजित होगी।".format(allocation.excess),
+                            " ₹%,.2f carried forward to the next bill.".format(allocation.excess)
+                        )
+                    )
+                }
+            }
+            onResult(true, msg(
+                "पावती $receiptNo - $monthsCovered महिन्यांसाठी ₹%,.2f नोंदवले.$tail".format(allocation.applied),
+                "रसीद $receiptNo - $monthsCovered महीनों के लिए ₹%,.2f दर्ज किया।$tail".format(allocation.applied),
+                "Receipt $receiptNo - ₹%,.2f recorded across $monthsCovered month(s).$tail".format(allocation.applied)
+            ))
+        }
+    }
+
+    /** A unit's bills that still owe something, oldest month first. */
+    fun pendingBillsFor(flatNumber: String): List<MaintenanceBill> =
+        bills.value
+            .filter { it.flatNumber.equals(flatNumber, ignoreCase = true) && it.pendingAmount > 0.009 }
+            .oldestMonthFirst()
+
+    /** Advance credit sitting against a unit, from an earlier overpayment. */
+    fun advanceCreditFor(flatNumber: String): Double =
+        residents.value
+            .firstOrNull { it.flatNumber.equals(flatNumber, ignoreCase = true) }
+            ?.advanceBalance
+            ?.coerceAtLeast(0.0)
+            ?: 0.0
+
+    /** What one unit owes: arrears, this month, and the credit set against them. */
+    fun duesFor(flatNumber: String): UnitDues = unitDues(
+        bills = bills.value.filter { it.flatNumber.equals(flatNumber, ignoreCase = true) },
+        excessCredit = advanceCreditFor(flatNumber)
+    )
+
+    private fun newReceiptNumber(): String =
+        "REC-${SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date())}-" +
+            "${Random.nextInt(1000, 9999)}"
 
     /**
      * Corrects a receipt that has already been taken.
@@ -1015,10 +1215,15 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
             return
         }
         safeLaunch {
+            // The bill takes only what it charged; a restatement that overshoots
+            // it carries forward as credit exactly as a fresh payment would,
+            // rather than sitting on the bill as money it never billed for.
+            val onBill = roundToPaise(minOf(amount, bill.payableTotal))
+            val excess = roundToPaise(amount - onBill)
             val updated = bill.copy(
-                amountPaid = amount,
+                amountPaid = onBill,
                 totalAmount = bill.payableTotal,
-                status = if (amount >= bill.payableTotal - 0.009) PaymentStatus.PAID else PaymentStatus.PARTIAL,
+                status = if (onBill >= bill.payableTotal - 0.009) PaymentStatus.PAID else PaymentStatus.PARTIAL,
                 paidDate = dateStr.ifBlank { bill.paidDate },
                 paymentMode = mode,
                 transactionRef = ref,
@@ -1026,11 +1231,15 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
             )
             repository.updateBill(updated)
 
-            val delta = amount - bill.amountPaid
+            val delta = onBill - bill.amountPaid
             val res = repository.getResidentByFlat(bill.flatNumber)
-            if (res != null && delta != 0.0) {
+            if (res != null && (delta != 0.0 || excess > 0.009)) {
                 repository.updateResident(
-                    res.copy(balanceDue = (res.balanceDue - delta).coerceAtLeast(0.0))
+                    res.copy(
+                        balanceDue = (res.balanceDue - delta).coerceAtLeast(0.0),
+                        advanceBalance = roundToPaise(res.advanceBalance + excess),
+                        advanceMode = if (excess > 0.009) mode else res.advanceMode
+                    )
                 )
             }
             onResult(true, msg(
@@ -1087,6 +1296,14 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Add new Maintenance Bill
+    /**
+     * Raises one month's bill for a unit.
+     *
+     * Any advance the unit is holding - money it paid over and above what it
+     * owed - is set against the new bill as it is created, so an overpayment
+     * lands on the very next month rather than waiting for somebody to remember
+     * it.
+     */
     fun generateBill(
         flatNumber: String,
         residentName: String,
@@ -1100,30 +1317,65 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
     ) {
         safeLaunch {
             val total = baseAmount + water + sinking + repair + lateFee
-            val newBill = MaintenanceBill(
-                flatNumber = flatNumber,
-                residentName = residentName,
-                billMonth = month,
-                baseAmount = baseAmount,
-                waterCharges = water,
-                sinkingFund = sinking,
-                repairFund = repair,
-                lateFeeAmount = lateFee,
-                totalAmount = total,
-                amountPaid = 0.0,
-                status = PaymentStatus.UNPAID,
-                dueDate = dueDate,
-                receiptNumber = "BILL-${SimpleDateFormat("yyMM", Locale.getDefault()).format(Date())}-${Random.nextInt(100, 999)}"
-            )
-            repository.insertBill(newBill)
-
             val res = repository.getResidentByFlat(flatNumber)
+            val credit = res?.advanceBalance?.coerceAtLeast(0.0) ?: 0.0
+            val fromAdvance = roundToPaise(minOf(credit, total))
+
+            repository.insertBill(
+                MaintenanceBill(
+                    flatNumber = flatNumber,
+                    residentName = residentName,
+                    billMonth = month,
+                    baseAmount = baseAmount,
+                    waterCharges = water,
+                    sinkingFund = sinking,
+                    repairFund = repair,
+                    lateFeeAmount = lateFee,
+                    totalAmount = total,
+                    amountPaid = fromAdvance,
+                    status = when {
+                        fromAdvance <= 0.009 -> PaymentStatus.UNPAID
+                        fromAdvance >= total - 0.009 -> PaymentStatus.PAID
+                        else -> PaymentStatus.PARTIAL
+                    },
+                    dueDate = dueDate,
+                    paidDate = if (fromAdvance > 0.009) {
+                        SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date())
+                    } else {
+                        ""
+                    },
+                    paymentMode = if (fromAdvance > 0.009) res?.advanceMode else null,
+                    transactionRef = if (fromAdvance > 0.009) ADVANCE_ADJUSTMENT_REF else "",
+                    receiptNumber = "BILL-${SimpleDateFormat("yyMM", Locale.getDefault()).format(Date())}-${Random.nextInt(100, 999)}"
+                )
+            )
+
             if (res != null) {
-                repository.updateResident(res.copy(balanceDue = res.balanceDue + total))
+                repository.updateResident(
+                    res.copy(
+                        balanceDue = (res.balanceDue + total - fromAdvance).coerceAtLeast(0.0),
+                        advanceBalance = roundToPaise(credit - fromAdvance)
+                    )
+                )
             }
-            showMessage(if (_language.value == AppLanguage.MARATHI) "$flatNumber साठी मासिक बिल तयार केले!" else "Maintenance bill created for $flatNumber!")
+
+            val adjusted = if (fromAdvance > 0.009) {
+                msg(
+                    " मागील ₹%,.2f जमा रक्कम वजा केली.".format(fromAdvance),
+                    " पिछली ₹%,.2f जमा राशि समायोजित की।".format(fromAdvance),
+                    " ₹%,.2f of advance credit adjusted against it.".format(fromAdvance)
+                )
+            } else {
+                ""
+            }
+            showMessage(msg(
+                "$flatNumber साठी मासिक बिल तयार केले!$adjusted",
+                "$flatNumber के लिए मासिक बिल बनाया!$adjusted",
+                "Maintenance bill created for $flatNumber.$adjusted"
+            ))
         }
     }
+
 
     /**
      * One unit-and-month that has no bill against it yet.
@@ -1189,13 +1441,27 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
             val duesAdded = mutableMapOf<String, Double>()
             var raised = 0
 
-            outstanding.forEach { missing ->
+            /*
+             * Advance credit a unit is holding is spent on the oldest month it
+             * is billed for, then what is left carries on to the next - exactly
+             * as a payment would be spread. The remainder is written back once,
+             * after the whole run.
+             */
+            val creditLeft = mutableMapOf<String, Double>()
+            val now = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date())
+
+            outstanding.sortedBy { billMonthKey(it.month) }.forEach { missing ->
                 val maintenance = society.monthlyTariffFor(missing.unit)
                 if (maintenance <= 0.0) return@forEach
                 val split = society.splitMaintenance(maintenance)
+                val flat = missing.unit.flatNumber
+                val credit = creditLeft.getOrPut(flat) { missing.unit.advanceBalance.coerceAtLeast(0.0) }
+                val fromAdvance = roundToPaise(minOf(credit, split.total))
+                creditLeft[flat] = roundToPaise(credit - fromAdvance)
+
                 repository.insertBill(
                     MaintenanceBill(
-                        flatNumber = missing.unit.flatNumber,
+                        flatNumber = flat,
                         residentName = missing.unit.ownerName,
                         billMonth = missing.month,
                         baseAmount = split.other,
@@ -1203,21 +1469,32 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
                         sinkingFund = split.sinking,
                         repairFund = split.repair,
                         totalAmount = split.total,
-                        amountPaid = 0.0,
-                        status = PaymentStatus.UNPAID,
+                        amountPaid = fromAdvance,
+                        status = when {
+                            fromAdvance <= 0.009 -> PaymentStatus.UNPAID
+                            fromAdvance >= split.total - 0.009 -> PaymentStatus.PAID
+                            else -> PaymentStatus.PARTIAL
+                        },
                         dueDate = dueDateFor(missing.month),
+                        paidDate = if (fromAdvance > 0.009) now else "",
+                        paymentMode = if (fromAdvance > 0.009) missing.unit.advanceMode else null,
+                        transactionRef = if (fromAdvance > 0.009) ADVANCE_ADJUSTMENT_REF else "",
                         receiptNumber = "BILL-${SimpleDateFormat("yyMM", Locale.getDefault()).format(Date())}-${Random.nextInt(100, 999)}"
                     )
                 )
-                duesAdded[missing.unit.flatNumber] =
-                    (duesAdded[missing.unit.flatNumber] ?: 0.0) + split.total
+                duesAdded[flat] = (duesAdded[flat] ?: 0.0) + split.total - fromAdvance
                 raised++
             }
 
             duesAdded.forEach { (flatNumber, added) ->
                 val res = repository.getResidentByFlat(flatNumber)
                 if (res != null) {
-                    repository.updateResident(res.copy(balanceDue = res.balanceDue + added))
+                    repository.updateResident(
+                        res.copy(
+                            balanceDue = (res.balanceDue + added).coerceAtLeast(0.0),
+                            advanceBalance = creditLeft[flatNumber] ?: res.advanceBalance
+                        )
+                    )
                 }
             }
 
@@ -1518,6 +1795,7 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
         flatNumber: String,
         wing: String,
         ownerName: String,
+        coApplicantName: String = "",
         tenantName: String,
         tenantPhone: String,
         rentAgreementBase64: String,
@@ -1588,6 +1866,7 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
                 flatNumber = flat,
                 wing = wing.trim().ifBlank { flat.substringBefore("-").take(1) },
                 ownerName = ownerName.trim(),
+                coApplicantName = coApplicantName.trim(),
                 tenantName = tenantName.trim(),
                 tenantContact = if (tenantName.isBlank()) "" else tenantPhone.trim(),
                 rentAgreementBase64 = if (tenantName.isBlank()) "" else rentAgreementBase64,
@@ -2402,11 +2681,25 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /** Updates the signed-in member's own contact details and photo. */
+    /**
+     * Updates the signed-in user's own profile.
+     *
+     * A member may fill in what the society never recorded, and nothing else.
+     * Their name, unit, mobile number and the rest are the society's register,
+     * and a register a member can quietly rewrite is not a register - a wrong
+     * mobile number there is a member the committee can no longer reach. So for
+     * a resident or tenant every field that already holds something is kept as
+     * it is, however the form was filled in, and only the blanks are taken.
+     *
+     * The committee and the staff edit their own details freely; the rule is
+     * about the membership register, not about everybody's contact card.
+     */
     fun updateMyProfile(
         ownerName: String,
         phone: String,
         email: String,
         photoBase64: String,
+        coApplicantName: String = "",
         onResult: (Boolean, String) -> Unit = { _, _ -> }
     ) {
         val current = _currentUser.value
@@ -2414,13 +2707,28 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
             onResult(false, "Not signed in.")
             return
         }
+
         safeLaunch {
-            val updated = current.copy(
-                ownerName = ownerName.trim().ifBlank { current.ownerName },
-                contactNumber = phone.trim(),
-                email = email.trim(),
-                photoBase64 = photoBase64
+            // Enforced here rather than only in the form, so a locked field
+            // cannot be got around by anything that calls this.
+            val updated = current.withProfileEdits(
+                ownerName = ownerName,
+                coApplicantName = coApplicantName,
+                contactNumber = phone,
+                email = email,
+                photoBase64 = photoBase64,
+                addOnly = current.role.isMember
             )
+
+            if (updated == current) {
+                onResult(true, msg(
+                    "भरण्यासारखे काही नवीन नव्हते.",
+                    "भरने के लिए कुछ नया नहीं था।",
+                    "There was nothing new to fill in."
+                ))
+                return@safeLaunch
+            }
+
             repository.updateResident(updated)
             _currentUser.value = updated
             onResult(true, msg("प्रोफाइल जतन केले!", "प्रोफ़ाइल सहेजी गई!", "Profile saved."))
@@ -2494,6 +2802,9 @@ class SocietyViewModel(application: Application) : AndroidViewModel(application)
 
     private companion object {
         const val TAG = "SocietyViewModel"
+
+        /** Marks a bill line settled from held credit rather than a fresh payment. */
+        const val ADVANCE_ADJUSTMENT_REF = "ADVANCE-ADJUSTMENT"
 
         /** Where the "new society registered" notice comes from and goes to. */
         const val REGISTRATION_EMAIL_FROM = "r@multisarv.com"

@@ -9,6 +9,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.pdf.PdfDocument
+import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import com.example.R
 import com.example.data.entity.MaintenanceBill
@@ -81,6 +82,87 @@ object ReceiptPdf {
             null
         }.getOrElse { "No app available to share the receipt." }
     }
+
+    /**
+     * Saves the receipt into the phone's own Downloads folder and says where it
+     * went, or explains why it could not.
+     *
+     * "Download" used to write into the app's cache directory and report the
+     * file name. Nothing was wrong with the PDF, but no file manager could
+     * reach it and Android could clear it at any time, so from the member's
+     * side the receipt simply was not downloadable. This puts it where every
+     * other download on the phone lands.
+     */
+    fun saveToDownloads(context: Context, bill: MaintenanceBill, society: SocietyInfo?): SaveResult {
+        val source = generate(context, bill, society)
+            ?: return SaveResult(false, "Could not create the receipt PDF.")
+        val name = source.name
+
+        // MediaStore owns Downloads from Android 10 onwards, and needs no
+        // permission for a file the app puts there itself.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            return runCatching {
+                val values = android.content.ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, name)
+                    put(MediaStore.Downloads.MIME_TYPE, PDF_MIME)
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: return SaveResult(false, "Could not open the Downloads folder.")
+                resolver.openOutputStream(uri).use { out ->
+                    requireNotNull(out).write(source.readBytes())
+                }
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                SaveResult(true, "Saved to Downloads as $name", uri)
+            }.getOrElse { SaveResult(false, "Could not save to Downloads.") }
+        }
+
+        /*
+         * Before Android 10 the public Downloads folder needs a storage
+         * permission this app never asks for. Rather than bolt a permission
+         * prompt onto a receipt, the file is opened straight away - the viewer
+         * that handles it can save or print it from there.
+         */
+        return runCatching {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", source)
+            SaveResult(true, "Opened the receipt - use Share to keep a copy.", uri).also { open(context, uri) }
+        }.getOrElse { SaveResult(false, "Could not open the receipt.") }
+    }
+
+    /**
+     * Opens the receipt in whatever PDF viewer the phone has.
+     *
+     * Returns null when it opened, or a message when nothing on the phone can
+     * show a PDF.
+     */
+    fun view(context: Context, bill: MaintenanceBill, society: SocietyInfo?): String? {
+        val file = generate(context, bill, society) ?: return "Could not create the receipt PDF."
+        return runCatching {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            open(context, uri)
+            null
+        }.getOrElse { "No app on this phone can open a PDF. Use Share instead." }
+    }
+
+    private fun open(context: Context, uri: android.net.Uri) {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, PDF_MIME)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    }
+
+    /** Where a receipt ended up, and what to tell the member about it. */
+    data class SaveResult(
+        val isSaved: Boolean,
+        val message: String,
+        val uri: android.net.Uri? = null
+    )
+
+    private const val PDF_MIME = "application/pdf"
 
     // ------------------------------------------------------------- rendering
 

@@ -28,12 +28,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterList
@@ -120,6 +122,8 @@ import com.example.data.entity.splitMaintenance
 import com.example.data.entity.unitTypeNames
 import com.example.data.entity.derivedStatus
 import com.example.data.entity.isStaff
+import com.example.data.entity.allocatePayment
+import com.example.data.entity.oldestMonthFirst
 import com.example.data.entity.payableTotal
 import com.example.data.entity.pendingAmount
 import com.example.ui.components.SearchableDropdownField
@@ -218,8 +222,10 @@ fun MaintenanceBillingView(
     var selectedBillForEdit by remember { mutableStateOf<MaintenanceBill?>(null) }
     var billPendingDeletion by remember { mutableStateOf<MaintenanceBill?>(null) }
     var isGenerateBillOpen by remember { mutableStateOf(false) }
+    var isBulkCollectOpen by remember { mutableStateOf(false) }
     // Bills open on what still needs collecting.
     var statusFilter by remember { mutableStateOf(PaymentStatus.UNPAID) }
+    var searchQuery by remember { mutableStateOf("") }
 
     selectedBillForEdit?.let { bill ->
         EditBillDialog(
@@ -314,7 +320,32 @@ fun MaintenanceBillingView(
         )
     }
 
-    val filteredBills = bills.filter { it.derivedStatus == statusFilter }
+    if (isBulkCollectOpen) {
+        BulkCollectionDialog(
+            viewModel = viewModel,
+            language = language,
+            onDismiss = { isBulkCollectOpen = false }
+        )
+    }
+
+    /*
+     * The same search the Receipts list has, because a committee looking for
+     * one unit's bill among several hundred was left scrolling for it. Unit
+     * number, member name, month and bill number are all matched, so whichever
+     * of them the chairman has to hand will find the bill.
+     */
+    val filteredBills = remember(bills, statusFilter, searchQuery) {
+        val term = searchQuery.trim()
+        bills.filter { bill ->
+            bill.derivedStatus == statusFilter && (
+                term.isBlank() ||
+                    bill.flatNumber.contains(term, ignoreCase = true) ||
+                    bill.residentName.contains(term, ignoreCase = true) ||
+                    bill.billMonth.contains(term, ignoreCase = true) ||
+                    bill.receiptNumber.contains(term, ignoreCase = true)
+                )
+        }
+    }
 
     /*
      * How much catching up there is: every billable unit crossed with every
@@ -380,47 +411,73 @@ fun MaintenanceBillingView(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Actions & Filters Row
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FilterChip(
-                        selected = statusFilter == PaymentStatus.UNPAID,
-                        onClick = { statusFilter = PaymentStatus.UNPAID },
-                        label = { Text(AppStrings.get("status_unpaid", language)) },
-                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = StatusOverdueBg),
-                        modifier = Modifier.testTag("bills_filter_unpaid")
-                    )
-                    FilterChip(
-                        selected = statusFilter == PaymentStatus.PARTIAL,
-                        onClick = { statusFilter = PaymentStatus.PARTIAL },
-                        label = { Text(AppStrings.get("status_partial", language)) },
-                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = StatusPendingBg),
-                        modifier = Modifier.testTag("bills_filter_partial")
-                    )
-                    FilterChip(
-                        selected = statusFilter == PaymentStatus.PAID,
-                        onClick = { statusFilter = PaymentStatus.PAID },
-                        label = { Text(AppStrings.get("status_paid", language)) },
-                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = StatusPaidBg),
-                        modifier = Modifier.testTag("bills_filter_paid")
-                    )
-                }
+            BillsFilterAndActionsRow(
+                statusFilter = statusFilter,
+                onSelectStatus = { statusFilter = it },
+                canEdit = canEdit,
+                language = language,
+                onBulkCollect = { isBulkCollectOpen = true },
+                onGenerateBill = { isGenerateBillOpen = true }
+            )
+        }
 
-                Button(
-                    onClick = { isGenerateBillOpen = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.testTag("generate_bill_btn")
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (language == AppLanguage.MARATHI) "बिल तयार करा" else "New Bill", style = MaterialTheme.typography.labelSmall)
-                }
+        item {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                label = {
+                    Text(
+                        if (language == AppLanguage.MARATHI) {
+                            "युनिट, सभासद, महिना किंवा बिल क्रमांकाने शोधा"
+                        } else {
+                            "Search by unit, member, month or bill no."
+                        }
+                    )
+                },
+                leadingIcon = {
+                    Icon(Icons.Default.Search, contentDescription = null, tint = TealPrimary)
+                },
+                trailingIcon = if (searchQuery.isBlank()) null else {
+                    {
+                        IconButton(
+                            onClick = { searchQuery = "" },
+                            modifier = Modifier.testTag("bill_search_clear_btn")
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear search")
+                        }
+                    }
+                },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("bill_search_input")
+            )
+        }
+
+        item {
+            Text(
+                text = "${filteredBills.size} bill(s) • ₹%,.2f pending".format(
+                    filteredBills.sumOf { it.pendingAmount }
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("bill_search_summary")
+            )
+        }
+
+        if (filteredBills.isEmpty() && searchQuery.isNotBlank()) {
+            item {
+                Text(
+                    text = if (language == AppLanguage.MARATHI) {
+                        "\"$searchQuery\" साठी कोणतेही बिल सापडले नाही."
+                    } else {
+                        "No bills match \"$searchQuery\"."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("bill_search_empty")
+                )
             }
         }
 
@@ -602,6 +659,115 @@ fun MaintenanceBillingView(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * The filter chips and the two actions that sit above the bill list.
+ *
+ * These used to share one `SpaceBetween` row. Three chips and two buttons do
+ * not fit across a 360dp phone, so the row overflowed: New Bill was squeezed to
+ * its minimum width, its label wrapped down a character at a time into a tall
+ * green sliver at the screen edge, and the height that sliver forced on the row
+ * left a band of dead space above the search field.
+ *
+ * They get a line each instead. The buttons stay right-aligned where they were,
+ * their labels are held to one line so no amount of squeezing can wrap them
+ * again, and the chips scroll sideways if a longer language or a fourth filter
+ * makes them wider than the screen.
+ */
+@Composable
+internal fun BillsFilterAndActionsRow(
+    statusFilter: PaymentStatus,
+    onSelectStatus: (PaymentStatus) -> Unit,
+    canEdit: Boolean,
+    language: AppLanguage,
+    onBulkCollect: () -> Unit,
+    onGenerateBill: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // One receipt for however many months it covers. Punching five
+            // separate ones for a single payment was the committee's most
+            // common piece of busywork.
+            if (canEdit) {
+                OutlinedButton(
+                    onClick = onBulkCollect,
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, TealPrimary),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.testTag("bulk_collect_btn")
+                ) {
+                    Icon(
+                        Icons.Default.Payments,
+                        contentDescription = null,
+                        tint = TealPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (language == AppLanguage.MARATHI) "एकत्रित पावती" else "Bulk Receipt",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TealPrimary,
+                        maxLines = 1
+                    )
+                }
+            }
+
+            Button(
+                onClick = onGenerateBill,
+                colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.testTag("generate_bill_btn")
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (language == AppLanguage.MARATHI) "बिल तयार करा" else "New Bill",
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FilterChip(
+                selected = statusFilter == PaymentStatus.UNPAID,
+                onClick = { onSelectStatus(PaymentStatus.UNPAID) },
+                label = { Text(AppStrings.get("status_unpaid", language), maxLines = 1) },
+                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = StatusOverdueBg),
+                modifier = Modifier.testTag("bills_filter_unpaid")
+            )
+            FilterChip(
+                selected = statusFilter == PaymentStatus.PARTIAL,
+                onClick = { onSelectStatus(PaymentStatus.PARTIAL) },
+                label = { Text(AppStrings.get("status_partial", language), maxLines = 1) },
+                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = StatusPendingBg),
+                modifier = Modifier.testTag("bills_filter_partial")
+            )
+            FilterChip(
+                selected = statusFilter == PaymentStatus.PAID,
+                onClick = { onSelectStatus(PaymentStatus.PAID) },
+                label = { Text(AppStrings.get("status_paid", language), maxLines = 1) },
+                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = StatusPaidBg),
+                modifier = Modifier.testTag("bills_filter_paid")
+            )
         }
     }
 }
@@ -1600,7 +1766,13 @@ fun RecordPaymentDialog(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Scrolls, so the amount, mode, reference, date and the receipt
+            // screenshot together can never push Save off the bottom on a
+            // short screen or with the keyboard up.
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Text(text = "Member: ${bill.residentName} (${bill.billMonth})")
                 Text(
                     text = "Bill ₹%,.2f  +  Late fee ₹%,.2f  =  Total ₹%,.2f".format(
@@ -2376,3 +2548,332 @@ private fun defaultDueDate(billMonth: String): String = runCatching {
 private fun monthSortKey(billMonth: String): Long = runCatching {
     SimpleDateFormat("MMMM yyyy", Locale.ENGLISH).parse(billMonth)?.time ?: 0L
 }.getOrDefault(0L)
+
+/**
+ * One receipt against however many months a payment covers.
+ *
+ * A unit that owes five months and pays part of it should cost the chairman a
+ * single entry, not five. Pick the unit, see what it owes month by month, type
+ * what was handed over, and the sheet shows exactly which months that clears
+ * before anything is written. Whatever the payment does not reach stays
+ * pending; anything over what is owed is carried to the next bill.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BulkCollectionDialog(
+    viewModel: SocietyViewModel,
+    language: AppLanguage,
+    onDismiss: () -> Unit
+) {
+    val bills by viewModel.bills.collectAsState()
+    val residents by viewModel.residents.collectAsState()
+
+    // Only units that actually owe something can be collected against.
+    val unitsWithDues = remember(bills) {
+        bills.filter { it.pendingAmount > 0.009 }
+            .map { it.flatNumber }
+            .distinct()
+            .sorted()
+    }
+
+    var flatNumber by remember(unitsWithDues) { mutableStateOf(unitsWithDues.firstOrNull().orEmpty()) }
+    var amountText by remember { mutableStateOf("") }
+    var mode by remember { mutableStateOf(PaymentMode.UPI) }
+    var isModeExpanded by remember { mutableStateOf(false) }
+    var reference by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val today = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(java.util.Date()) }
+    var paidOn by remember { mutableStateOf(today) }
+
+    val pending = remember(bills, flatNumber) {
+        bills.filter { it.flatNumber.equals(flatNumber, ignoreCase = true) && it.pendingAmount > 0.009 }
+            .oldestMonthFirst()
+    }
+    val totalPending = pending.sumOf { it.pendingAmount }
+    val memberName = residents.firstOrNull { it.flatNumber.equals(flatNumber, ignoreCase = true) }
+        ?.ownerName
+        .orEmpty()
+
+    val amount = amountText.toDoubleOrNull() ?: 0.0
+    // Worked out as the chairman types, so the split is seen before it is saved.
+    val preview = remember(pending, amount) { allocatePayment(pending, amount) }
+
+    AlertDialog(
+        modifier = DialogWidth,
+        properties = WideDialogProperties,
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(
+                    text = if (language == AppLanguage.MARATHI) {
+                        "एकत्रित पावती (अनेक महिने)"
+                    } else {
+                        "Bulk Receipt - Multiple Months"
+                    },
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+                Text(
+                    text = if (language == AppLanguage.MARATHI) {
+                        "एका पावतीत अनेक महिन्यांची रक्कम नोंदवा"
+                    } else {
+                        "Record one payment against several pending months"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 460.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (unitsWithDues.isEmpty()) {
+                    Text(
+                        text = if (language == AppLanguage.MARATHI) {
+                            "कोणत्याही युनिटची थकबाकी नाही."
+                        } else {
+                            "No unit has anything pending."
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.testTag("bulk_collect_nothing_pending")
+                    )
+                    return@Column
+                }
+
+                SearchableDropdownField(
+                    label = AppStrings.get("unit_number_label", language),
+                    value = flatNumber,
+                    options = unitsWithDues,
+                    onValueChange = { flatNumber = it; errorMessage = null },
+                    allowFreeText = false,
+                    testTag = "bulk_collect_unit_dropdown"
+                )
+
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = StatusOverdueBg),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = if (memberName.isBlank()) flatNumber else "$flatNumber • $memberName",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = if (language == AppLanguage.MARATHI) {
+                                "${pending.size} महिने थकीत • एकूण ₹%,.2f".format(totalPending)
+                            } else {
+                                "${pending.size} month(s) pending • ₹%,.2f total".format(totalPending)
+                            },
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = StatusOverdue,
+                            modifier = Modifier.testTag("bulk_collect_total_pending")
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it.filter { ch -> ch.isDigit() || ch == '.' }; errorMessage = null },
+                    label = { Text(AppStrings.get("amount_paid", language)) },
+                    placeholder = { Text("%.0f".format(totalPending)) },
+                    supportingText = {
+                        Text(
+                            if (language == AppLanguage.MARATHI) {
+                                "पूर्ण भरणा: ₹%,.2f".format(totalPending)
+                            } else {
+                                "Pay in full: ₹%,.2f".format(totalPending)
+                            }
+                        )
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("bulk_collect_amount_input")
+                )
+
+                ExposedDropdownMenuBox(
+                    expanded = isModeExpanded,
+                    onExpandedChange = { isModeExpanded = !isModeExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = if (language == AppLanguage.MARATHI) mode.labelMr else mode.labelEn,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text(AppStrings.get("payment_mode", language)) },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = isModeExpanded)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor()
+                            .testTag("bulk_collect_mode_input")
+                    )
+                    ExposedDropdownMenu(
+                        expanded = isModeExpanded,
+                        onDismissRequest = { isModeExpanded = false }
+                    ) {
+                        PaymentMode.entries.forEach { option ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (language == AppLanguage.MARATHI) option.labelMr else option.labelEn
+                                    )
+                                },
+                                onClick = { mode = option; isModeExpanded = false }
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = reference,
+                    onValueChange = { reference = it },
+                    label = { Text(AppStrings.get("transaction_ref", language)) },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("bulk_collect_ref_input")
+                )
+
+                OutlinedTextField(
+                    value = paidOn,
+                    onValueChange = { paidOn = it },
+                    label = { Text(AppStrings.get("payment_date", language)) },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("bulk_collect_date_input")
+                )
+
+                // What this payment would do, month by month, before it is made.
+                if (amount > 0.0) {
+                    HorizontalDivider()
+                    Text(
+                        text = if (language == AppLanguage.MARATHI) {
+                            "ही रक्कम अशी वळती होईल"
+                        } else {
+                            "This payment will be adjusted as follows"
+                        },
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                    )
+                    preview.allocations.forEach { line ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("bulk_preview_${line.bill.billMonth.replace(" ", "_")}"),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = line.bill.billMonth,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                )
+                                Text(
+                                    text = when {
+                                        line.applied <= 0.009 -> if (language == AppLanguage.MARATHI) {
+                                            "थकीत राहील ₹%,.2f".format(line.pendingAfter)
+                                        } else {
+                                            "Stays pending ₹%,.2f".format(line.pendingAfter)
+                                        }
+                                        line.isSettled -> if (language == AppLanguage.MARATHI) {
+                                            "पूर्ण भरले"
+                                        } else {
+                                            "Settled in full"
+                                        }
+                                        else -> if (language == AppLanguage.MARATHI) {
+                                            "अंशतः • ₹%,.2f थकीत".format(line.pendingAfter)
+                                        } else {
+                                            "Part paid • ₹%,.2f still pending".format(line.pendingAfter)
+                                        }
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (line.isSettled) StatusPaid else StatusOverdue
+                                )
+                            }
+                            Text(
+                                text = "₹%,.2f".format(line.applied),
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                    }
+
+                    if (preview.excess > 0.009) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = StatusPaidBg,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = if (language == AppLanguage.MARATHI) {
+                                    "₹%,.2f जास्तीची रक्कम पुढील महिन्याच्या बिलात वजा होईल.".format(preview.excess)
+                                } else {
+                                    "₹%,.2f extra will be carried forward to the next month's bill."
+                                        .format(preview.excess)
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = StatusPaid,
+                                modifier = Modifier
+                                    .padding(10.dp)
+                                    .testTag("bulk_collect_excess_note")
+                            )
+                        }
+                    }
+                }
+
+                errorMessage?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.testTag("bulk_collect_error")
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = unitsWithDues.isNotEmpty() && amount > 0.0,
+                onClick = {
+                    viewModel.recordBulkPayment(
+                        flatNumber = flatNumber,
+                        amount = amount,
+                        mode = mode,
+                        ref = reference.trim(),
+                        dateStr = paidOn.trim()
+                    ) { ok, message ->
+                        if (ok) {
+                            viewModel.showMessage(message)
+                            onDismiss()
+                        } else {
+                            errorMessage = message
+                        }
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.testTag("bulk_collect_save_btn")
+            ) {
+                Text(
+                    text = if (language == AppLanguage.MARATHI) "पावती नोंदवा" else "Record Receipt",
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(AppStrings.get("cancel", language))
+            }
+        }
+    )
+}

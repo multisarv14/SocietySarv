@@ -58,6 +58,24 @@ object AppStrings {
         "society_profile" to Translation("Society Profile", "सोसायटी प्रोफ़ाइल", "संस्था प्रोफाइल"),
         "user_profile" to Translation("My Profile", "मेरी प्रोफ़ाइल", "माझे प्रोफाइल"),
         "edit_profile" to Translation("Edit", "संपादित करें", "संपादन"),
+        // A member fills in blanks rather than editing the register, so their
+        // button says so.
+        "add_missing_details" to Translation(
+            "Add Missing Details",
+            "छूटी जानकारी जोड़ें",
+            "राहिलेली माहिती भरा"
+        ),
+        "add_missing_only_note" to Translation(
+            "You can fill in details the society does not have yet. Anything already on record is shown locked - ask the committee to correct it.",
+            "आप वह जानकारी भर सकते हैं जो सोसायटी के पास नहीं है। जो पहले से दर्ज है वह लॉक दिखेगी - उसे बदलवाने के लिए समिति से संपर्क करें।",
+            "संस्थेकडे नसलेली माहिती तुम्ही भरू शकता. आधीच नोंद असलेली माहिती लॉक दिसेल - ती बदलण्यासाठी समितीशी संपर्क साधा."
+        ),
+        "society_financial_overview" to Translation(
+            "Society Financial Overview",
+            "सोसायटी वित्तीय अवलोकन",
+            "संस्थेचा वित्तीय आढावा"
+        ),
+        "my_receipts" to Translation("My Payment Receipts", "मेरी भुगतान रसीदें", "माझ्या पावत्या"),
         "save_profile" to Translation("Save Changes", "बदलाव सहेजें", "बदल जतन करा"),
         "chairman_only_edit" to Translation(
             "Only the Chairman can edit these details.",
@@ -65,8 +83,9 @@ object AppStrings {
             "फक्त अध्यक्षच ही माहिती बदलू शकतात."
         ),
         "add_emergency_contact" to Translation("Add Contact", "संपर्क जोड़ें", "संपर्क जोडा"),
-        "share_receipt" to Translation("Share Receipt", "रसीद साझा करें", "पावती शेअर करा"),
-        "download_receipt" to Translation("Save PDF", "पीडीएफ सहेजें", "पीडीएफ जतन करा"),
+        "share_receipt" to Translation("Share", "साझा करें", "शेअर"),
+        "download_receipt" to Translation("Download", "डाउनलोड", "डाउनलोड"),
+        "view_receipt" to Translation("View", "देखें", "पहा"),
         "total_pending" to Translation("Total Pending", "कुल बकाया", "एकूण थकबाकी"),
         "unit_number_label" to Translation("Unit Number", "इकाई संख्या", "सदनिका क्रमांक"),
         "pay" to Translation("Pay", "भुगतान", "भरणा"),

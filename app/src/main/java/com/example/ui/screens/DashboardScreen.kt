@@ -294,11 +294,7 @@ fun DashboardScreen(
             AnimatedSectionCard(delayMillis = 200) {
                 Column {
                     SectionHeader(
-                        title = when (language) {
-                            AppLanguage.MARATHI -> "वित्तीय डॅशबोर्ड व ताळेबंद अहवाल"
-                            AppLanguage.HINDI -> "वित्तीय डैशबोर्ड एवं तुलन पत्र"
-                            AppLanguage.ENGLISH -> "Executive Financial Overview"
-                        },
+                        title = AppStrings.get("society_financial_overview", language),
                         subtitle = listOfNotNull(
                             society?.billingStartMonth?.takeIf { it.isNotBlank() }?.let { "Billing from $it" },
                             society?.name?.takeIf { it.isNotBlank() }

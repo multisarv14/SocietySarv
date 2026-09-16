@@ -280,6 +280,7 @@ private fun SocietyRegistrationEditor(
     var bankAccount by remember(society) { mutableStateOf(society.bankAccountNumber) }
     var ifsc by remember(society) { mutableStateOf(society.ifscCode) }
     var upiId by remember(society) { mutableStateOf(society.upiId) }
+    var paymentQrBase64 by remember(society) { mutableStateOf(society.paymentQrBase64) }
     var billingStartMonth by remember(society) {
         mutableStateOf(society.billingStartMonth.ifBlank { currentMonthLabel() })
     }
@@ -443,6 +444,8 @@ private fun SocietyRegistrationEditor(
                             bankAccount = bankAccount, onBankAccount = { bankAccount = it },
                             ifscCode = ifsc, onIfsc = { ifsc = it },
                             upiId = upiId, onUpiId = { upiId = it },
+                            paymentQrBase64 = paymentQrBase64,
+                            onPaymentQr = { paymentQrBase64 = it },
                             initialBankBalance = "", onInitialBalance = {},
                             billingStartMonth = billingStartMonth,
                             onBillingStartMonth = { billingStartMonth = it },
@@ -542,6 +545,7 @@ private fun SocietyRegistrationEditor(
                                     bankAccountNumber = bankAccount.trim(),
                                     ifscCode = ifsc.trim().uppercase(),
                                     upiId = upiId.trim(),
+                                    paymentQrBase64 = paymentQrBase64,
                                     wingNames = wingNames,
                                     wingPlans = wingPlans,
                                     unitTypes = unitTypes,
@@ -723,9 +727,29 @@ fun UserProfileDialog(
     }
     var isEditing by remember { mutableStateOf(false) }
     var name by remember(currentUser) { mutableStateOf(currentUser.ownerName) }
+    var coApplicant by remember(currentUser) { mutableStateOf(currentUser.coApplicantName) }
     var phone by remember(currentUser) { mutableStateOf(currentUser.contactNumber) }
     var email by remember(currentUser) { mutableStateOf(currentUser.email) }
     var photoBase64 by remember(currentUser) { mutableStateOf(currentUser.photoBase64) }
+
+    /*
+     * A member fills in blanks; they do not rewrite the register.
+     *
+     * Their name, mobile number and the rest are the society's own record of
+     * who lives where, so anything already on file is shown locked and only
+     * what is genuinely missing can be typed into. The committee and the staff
+     * edit their own details as before.
+     */
+    val isMemberProfile = currentUser.role == UserRole.RESIDENT || currentUser.role == UserRole.TENANT
+    val missingFields = listOf(
+        currentUser.ownerName,
+        currentUser.coApplicantName,
+        currentUser.contactNumber,
+        currentUser.email,
+        currentUser.photoBase64
+    ).count { it.isBlank() }
+    val hasSomethingToAdd = !isMemberProfile || missingFields > 0
+    fun locked(existing: String) = isMemberProfile && existing.isNotBlank()
 
     var newPin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
@@ -742,14 +766,21 @@ fun UserProfileDialog(
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     modifier = Modifier.weight(1f)
                 )
-                if (!isEditing) {
+                if (!isEditing && hasSomethingToAdd) {
                     TextButton(
                         onClick = { isEditing = true },
                         modifier = Modifier.testTag("edit_user_profile_btn")
                     ) {
                         Icon(Icons.Default.Edit, contentDescription = null, tint = TealPrimary)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(AppStrings.get("edit_profile", language), color = TealPrimary)
+                        Text(
+                            text = if (isMemberProfile) {
+                                AppStrings.get("add_missing_details", language)
+                            } else {
+                                AppStrings.get("edit_profile", language)
+                            },
+                            color = TealPrimary
+                        )
                     }
                 }
             }
@@ -777,7 +808,9 @@ fun UserProfileDialog(
                     }
                 }
 
-                if (isEditing) {
+                // A photo already on file stays; a missing one can be added.
+                // The chairman sees whatever is here in the member directory.
+                if (isEditing && !locked(currentUser.photoBase64)) {
                     Spacer(modifier = Modifier.height(8.dp))
                     LogoPickerButton(
                         label = if (photoBase64.isBlank()) "Upload Photo" else "Change Photo",
@@ -790,11 +823,39 @@ fun UserProfileDialog(
                 HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
 
                 if (isEditing) {
-                    ProfileField("Full Name", name) { name = it }
-                    ProfileField("Mobile Number", phone, keyboardType = KeyboardType.Phone) {
-                        phone = it.filter { ch -> ch.isDigit() }.take(10)
+                    if (isMemberProfile) {
+                        Text(
+                            text = AppStrings.get("add_missing_only_note", language),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .padding(bottom = 8.dp)
+                                .testTag("profile_add_only_note")
+                        )
                     }
-                    ProfileField("Email", email, keyboardType = KeyboardType.Email) { email = it }
+
+                    ProfileField(
+                        label = "Full Name",
+                        value = name,
+                        enabled = !locked(currentUser.ownerName)
+                    ) { name = it }
+                    ProfileField(
+                        label = "Co-Applicant Name",
+                        value = coApplicant,
+                        enabled = !locked(currentUser.coApplicantName)
+                    ) { coApplicant = it }
+                    ProfileField(
+                        label = "Mobile Number",
+                        value = phone,
+                        keyboardType = KeyboardType.Phone,
+                        enabled = !locked(currentUser.contactNumber)
+                    ) { phone = it.filter { ch -> ch.isDigit() }.take(10) }
+                    ProfileField(
+                        label = "Email",
+                        value = email,
+                        keyboardType = KeyboardType.Email,
+                        enabled = !locked(currentUser.email)
+                    ) { email = it }
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                     Text(
@@ -819,6 +880,7 @@ fun UserProfileDialog(
                     ProfileRow("Unit No.", currentUser.flatNumber)
                     ProfileRow("Wing", currentUser.wing)
                     ProfileRow("Role", getRoleLabel(currentUser.role, language))
+                    ProfileRow("Co-Applicant", currentUser.coApplicantName)
                     ProfileRow("Mobile", currentUser.contactNumber)
                     ProfileRow("Email", currentUser.email)
                     if (currentUser.tenantName.isNotBlank()) ProfileRow("Tenant", currentUser.tenantName)
@@ -874,7 +936,13 @@ fun UserProfileDialog(
                                 return@Button
                             }
                         }
-                        viewModel.updateMyProfile(name, phone, email, photoBase64) { ok, message ->
+                        viewModel.updateMyProfile(
+                            ownerName = name,
+                            phone = phone,
+                            email = email,
+                            photoBase64 = photoBase64,
+                            coApplicantName = coApplicant
+                        ) { ok, message ->
                             if (!ok) {
                                 error = message
                                 return@updateMyProfile
@@ -942,16 +1010,27 @@ private fun ProfileField(
     isError: Boolean = false,
     supporting: String? = null,
     minLines: Int = 1,
+    /**
+     * False for a detail the society has already recorded. The field is still
+     * shown, with what is on file in it - a member needs to see their own
+     * record - but it is read-only and says so.
+     */
+    enabled: Boolean = true,
     onValueChange: (String) -> Unit
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
+        readOnly = !enabled,
         singleLine = minLines == 1,
         minLines = minLines,
         isError = isError,
-        supportingText = supporting?.let { { Text(it) } },
+        supportingText = when {
+            supporting != null -> { { Text(supporting) } }
+            !enabled -> { { Text("Already on record with the society.") } }
+            else -> null
+        },
         visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
         leadingIcon = if (isPassword) {
             { Icon(Icons.Default.Lock, contentDescription = null, tint = TealPrimary) }

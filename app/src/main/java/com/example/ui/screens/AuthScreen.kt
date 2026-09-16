@@ -34,16 +34,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CorporateFare
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material.icons.filled.Visibility
@@ -733,6 +734,7 @@ fun SocietyRegistrationWizard(
     var bankAccount by remember { mutableStateOf("") }
     var ifscCode by remember { mutableStateOf("") }
     var upiId by remember { mutableStateOf("") }
+    var paymentQrBase64 by remember { mutableStateOf("") }
     var initialBankBalance by remember { mutableStateOf("") }
     // Billing opens on the current month unless the committee moves it back.
     var billingStartMonth by remember { mutableStateOf(currentMonthLabel()) }
@@ -853,6 +855,7 @@ fun SocietyRegistrationWizard(
                     bankAccount = bankAccount, onBankAccount = { bankAccount = it },
                     ifscCode = ifscCode, onIfsc = { ifscCode = it },
                     upiId = upiId, onUpiId = { upiId = it },
+                    paymentQrBase64 = paymentQrBase64, onPaymentQr = { paymentQrBase64 = it },
                     initialBankBalance = initialBankBalance, onInitialBalance = { initialBankBalance = it },
                     billingStartMonth = billingStartMonth,
                     onBillingStartMonth = { billingStartMonth = it }
@@ -959,6 +962,7 @@ fun SocietyRegistrationWizard(
                                 bankAccount = bankAccount,
                                 ifsc = ifscCode,
                                 upiId = upiId,
+                                paymentQrBase64 = paymentQrBase64,
                                 initialBankBalance = initialBankBalance.toDoubleOrNull() ?: 0.0,
                                 billingStartMonth = billingStartMonth,
                                 wingNames = wingNames,
@@ -1033,6 +1037,7 @@ internal fun SocietyDetailsStep(
     bankAccount: String, onBankAccount: (String) -> Unit,
     ifscCode: String, onIfsc: (String) -> Unit,
     upiId: String, onUpiId: (String) -> Unit,
+    paymentQrBase64: String, onPaymentQr: (String) -> Unit,
     initialBankBalance: String, onInitialBalance: (String) -> Unit,
     billingStartMonth: String, onBillingStartMonth: (String) -> Unit,
     /**
@@ -1191,6 +1196,8 @@ internal fun SocietyDetailsStep(
             .testTag("wizard_upi_id_input")
     )
     FieldGap()
+    PaymentQrUploadRow(qrBase64 = paymentQrBase64, onQr = onPaymentQr)
+    FieldGap()
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1282,6 +1289,93 @@ internal fun LogoUploadRow(logoBase64: String, onLogo: (String) -> Unit) {
             }
             if (logoBase64.isNotBlank()) {
                 TextButton(onClick = { onLogo("") }) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            }
+            pickError?.let {
+                Text(text = it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+/**
+ * The society's own payment QR, for banks whose code carries more than the VPA.
+ *
+ * A generated QR is built from the UPI id alone. Some providers issue a QR that
+ * also carries a merchant id or a signature, and only that exact image will
+ * resolve - so the chairman can upload theirs, and members are shown it in
+ * place of the generated one.
+ */
+@Composable
+internal fun PaymentQrUploadRow(qrBase64: String, onQr: (String) -> Unit) {
+    val context = LocalContext.current
+    var pickError by remember { mutableStateOf<String?>(null) }
+    val preview = rememberBlobImage(qrBase64)
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val encoded = runCatching {
+            context.contentResolver.openInputStream(uri).use { stream ->
+                val bitmap = BitmapFactory.decodeStream(stream) ?: error("unsupported image")
+                // A QR is read module by module, so it is kept at a higher
+                // quality than a logo - JPEG smudging the modules is the
+                // difference between a code that scans and one that does not.
+                ImageBlob.fromBitmap(bitmap, quality = 95)
+            }
+        }
+        encoded.onSuccess { onQr(it); pickError = null }
+            .onFailure { pickError = "Could not read that image. Pick a JPG or PNG of the QR." }
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(SlateSurfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            if (preview != null) {
+                Image(
+                    bitmap = preview,
+                    contentDescription = "Society payment QR",
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Icon(Icons.Default.QrCode2, contentDescription = null, tint = TealPrimary)
+            }
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            OutlinedButton(
+                onClick = { picker.launch("image/*") },
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, TealPrimary),
+                modifier = Modifier.testTag("wizard_payment_qr_upload_btn")
+            ) {
+                Text(
+                    text = if (qrBase64.isBlank()) "Upload Payment QR" else "Change Payment QR",
+                    color = TealPrimary
+                )
+            }
+            Text(
+                text = if (qrBase64.isBlank()) {
+                    "Optional. Leave this empty and members get a QR generated from the UPI ID above."
+                } else {
+                    "Members will be shown this QR instead of the generated one."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (qrBase64.isNotBlank()) {
+                TextButton(
+                    onClick = { onQr("") },
+                    modifier = Modifier.testTag("wizard_payment_qr_remove_btn")
+                ) {
                     Text("Remove", color = MaterialTheme.colorScheme.error)
                 }
             }

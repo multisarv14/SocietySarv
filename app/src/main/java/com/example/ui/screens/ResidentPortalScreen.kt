@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,7 +33,6 @@ import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Receipt
-import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -65,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.entity.ComplaintCategory
@@ -80,6 +82,7 @@ import com.example.data.entity.financialYearOf
 import com.example.data.entity.financialYears
 import com.example.data.entity.payableTotal
 import com.example.data.entity.pendingAmount
+import com.example.data.entity.unitDues
 import com.example.data.localization.AppLanguage
 import com.example.ui.components.DialogWidth
 import com.example.ui.components.WideDialogProperties
@@ -159,10 +162,34 @@ fun ResidentPortalScreen(
     }
     val myVisitors = visitors.filter { it.flatNumber.uppercase() in myUnitNumbers }
 
+    /*
+     * What this unit owes, in the three parts a member reads separately: the
+     * arrears behind them, this month's bill, and any credit they are already
+     * in from an overpayment. The card below shows all three and the net of
+     * them, rather than a single figure that quietly disagreed with the
+     * month-wise table.
+     */
+    val advanceCredit = (unit?.advanceBalance ?: 0.0).coerceAtLeast(0.0)
+    // Every bill the unit has, not just the financial year on screen: what a
+    // member owes does not reset because they looked back at last year.
+    val dues = remember(unitBills, advanceCredit) { unitDues(unitBills, advanceCredit) }
+
+    /*
+     * Every payment this unit has been receipted for, newest month first.
+     *
+     * A bill that is only part paid carries a receipt just as a settled one
+     * does, and a member had no way to reach either: the bill card offers the
+     * receipt only once the bill is fully paid. This lists them all in one
+     * place, which is where a member goes looking for last March anyway.
+     */
+    val myReceipts = remember(myBills) {
+        myBills.filter { it.amountPaid > 0.009 }
+            .sortedByDescending { portalMonthKey(it.billMonth) }
+    }
+
     var selectedBillForReceipt by remember { mutableStateOf<MaintenanceBill?>(null) }
     var selectedBillForQr by remember { mutableStateOf<MaintenanceBill?>(null) }
     var isPasscodeGenOpen by remember { mutableStateOf(false) }
-    var isFileComplaintOpen by remember { mutableStateOf(false) }
     var isChangePinOpen by remember { mutableStateOf(false) }
     var generatedPasscode by remember { mutableStateOf<String?>(null) }
 
@@ -171,6 +198,7 @@ fun ResidentPortalScreen(
             bill = selectedBillForQr!!,
             society = society,
             language = language,
+            dues = dues,
             onDismiss = { selectedBillForQr = null },
             // The committee receipts the payment once it lands; the member
             // just closes the sheet.
@@ -250,19 +278,6 @@ fun ResidentPortalScreen(
         )
     }
 
-    if (isFileComplaintOpen) {
-        FileComplaintDialog(
-            currentUser = unit,
-            myUnits = myUnits,
-            language = language,
-            onDismiss = { isFileComplaintOpen = false },
-            onSubmit = { cat, desc, flat, name ->
-                viewModel.fileComplaint(cat, desc, flat, name)
-                isFileComplaintOpen = false
-            }
-        )
-    }
-
     if (isChangePinOpen) {
         ChangePinDialog(
             language = language,
@@ -317,84 +332,161 @@ fun ResidentPortalScreen(
             }
         }
 
-        // Resident Profile & Dues Card
+        /*
+         * Member card.
+         *
+         * Deliberately compact - a smaller avatar, one line of identity, tight
+         * padding - so the dues underneath it are on screen without scrolling.
+         * It is a plain item of this list and holds no scroll of its own, so it
+         * moves with the page rather than sliding under its own heading.
+         */
         item {
             Card(
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = TealPrimaryContainer),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("portal_member_card")
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Box(
                                 modifier = Modifier
-                                    .size(44.dp)
+                                    .size(34.dp)
                                     .clip(CircleShape)
                                     .background(TealPrimary),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Home, contentDescription = null, tint = Color.White)
+                                Icon(
+                                    Icons.Default.Home,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "${unit?.flatNumber ?: ""} • ${unit?.ownerName ?: "Member"}",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = TealPrimary
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = TealPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     text = "${unit?.flatType?.displayName ?: "2 BHK"} • Wing ${unit?.wing ?: "A"}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
                                 )
                             }
                         }
 
-                        IconButton(onClick = { isChangePinOpen = true }) {
-                            Icon(Icons.Default.Lock, contentDescription = "Change PIN", tint = TealPrimary)
+                        IconButton(
+                            onClick = { isChangePinOpen = true },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Lock,
+                                contentDescription = "Change PIN",
+                                tint = TealPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
 
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-                    // Taken from the bills themselves so this can never disagree
-                    // with the month-wise table below it.
-                    val outstanding = myBills.sumOf { it.pendingAmount }
+                    /*
+                     * Every figure here comes off the bills themselves, so this
+                     * can never disagree with the month-wise table below it.
+                     * Arrears, this month and any credit are each shown, then
+                     * the one number the member actually has to pay.
+                     */
+                    if (dues.previousPending > 0.009) {
+                        PortalDuesLine(
+                            label = if (language == AppLanguage.MARATHI) "मागील थकबाकी" else "Previous pending",
+                            amount = dues.previousPending
+                        )
+                    }
+                    if (dues.currentPending > 0.009) {
+                        PortalDuesLine(
+                            label = if (language == AppLanguage.MARATHI) "या महिन्याचे बिल" else "Current bill",
+                            amount = dues.currentPending
+                        )
+                    }
+                    if (dues.excessCredit > 0.009) {
+                        PortalDuesLine(
+                            label = if (language == AppLanguage.MARATHI) "जमा (जास्तीची) रक्कम" else "Advance credit",
+                            amount = -dues.excessCredit,
+                            color = StatusPaid,
+                            testTag = "portal_advance_credit"
+                        )
+                    }
 
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = if (language == AppLanguage.MARATHI) "थकीत देखभाल शुल्क (Total Due)" else "Outstanding Due Balance",
-                                style = MaterialTheme.typography.labelMedium
+                                text = if (language == AppLanguage.MARATHI) {
+                                    "एकूण भरायची रक्कम"
+                                } else {
+                                    "Total Payable"
+                                },
+                                style = MaterialTheme.typography.labelSmall
                             )
                             Text(
-                                text = "₹%,.2f".format(outstanding),
-                                style = MaterialTheme.typography.headlineSmall.copy(
+                                text = "₹%,.2f".format(dues.netPayable),
+                                style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Bold,
-                                    color = if (outstanding > 0.009) StatusOverdue else StatusPaid
+                                    color = if (dues.isSettled) StatusPaid else StatusOverdue
                                 ),
                                 modifier = Modifier.testTag("portal_outstanding_amount")
                             )
+                            // Credit beyond everything owed is the member's, and
+                            // comes off whatever is billed next.
+                            if (dues.creditInHand > 0.009) {
+                                Text(
+                                    text = if (language == AppLanguage.MARATHI) {
+                                        "₹%,.2f पुढील बिलात वजा होईल".format(dues.creditInHand)
+                                    } else {
+                                        "₹%,.2f credit carries to your next bill".format(dues.creditInHand)
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = StatusPaid,
+                                    modifier = Modifier.testTag("portal_credit_in_hand")
+                                )
+                            }
                         }
 
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = if (outstanding > 0.009) StatusOverdue.copy(alpha = 0.15f) else StatusPaidBg
+                            color = if (dues.isSettled) StatusPaidBg else StatusOverdue.copy(alpha = 0.15f)
                         ) {
                             Text(
-                                text = if (outstanding > 0.009) AppStrings.get("status_unpaid", language) else AppStrings.get("status_paid", language),
+                                text = if (dues.isSettled) {
+                                    AppStrings.get("status_paid", language)
+                                } else {
+                                    AppStrings.get("status_unpaid", language)
+                                },
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = if (outstanding > 0.009) StatusOverdue else StatusPaid,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                color = if (dues.isSettled) StatusPaid else StatusOverdue,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                             )
                         }
                     }
@@ -439,39 +531,34 @@ fun ResidentPortalScreen(
             }
         }
 
-        // Resident Quick Actions
+        /*
+         * Resident quick actions.
+         *
+         * Raising a complaint lives on the Helpdesk, where the member can also
+         * see what came of it. Offering it here as well put the form in one
+         * place and the answer in another, so this screen keeps only the action
+         * that has nowhere else to be.
+         */
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            Button(
+                onClick = { isPasscodeGenOpen = true },
+                colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("gen_passcode_btn")
             ) {
-                Button(
-                    onClick = { isPasscodeGenOpen = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .testTag("gen_passcode_btn")
-                ) {
-                    Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (language == AppLanguage.MARATHI) "अभ्यागत पासकोड" else "Passcode", style = MaterialTheme.typography.labelMedium)
-                }
-
-                Button(
-                    onClick = { isFileComplaintOpen = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = StatusOverdue),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .testTag("portal_file_complaint_btn")
-                ) {
-                    Icon(Icons.Default.SupportAgent, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(AppStrings.get("file_complaint", language), style = MaterialTheme.typography.labelMedium)
-                }
+                Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (language == AppLanguage.MARATHI) {
+                        "अभ्यागत पासकोड तयार करा"
+                    } else {
+                        "Visitor Passcode"
+                    },
+                    style = MaterialTheme.typography.labelMedium
+                )
             }
         }
 
@@ -644,71 +731,209 @@ fun ResidentPortalScreen(
             )
         }
 
+        /*
+         * Bill cards.
+         *
+         * A single row: the month and its status on the left, the amount and
+         * the one action on the right. The old two-row card with a divider
+         * through it was twice as tall for no more information, and a member
+         * with a year of bills had to scroll past all of it.
+         */
         items(myBills) { bill ->
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, SlateOutlineVariant),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("portal_bill_card_${bill.billMonth.replace(" ", "_")}")
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(text = bill.billMonth, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
-                            Text(text = "Due: ${bill.dueDate}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = bill.billMonth,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            maxLines = 1
+                        )
+                        Text(
                             // Derived, not stored, so an edited bill never
                             // disagrees with the month-wise table above.
-                            Text(text = "₹%,.2f".format(bill.payableTotal), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                            StatusBadge(status = bill.derivedStatus, language = language)
-                        }
+                            text = "₹%,.2f".format(bill.payableTotal) +
+                                if (bill.pendingAmount > 0.009 && bill.amountPaid > 0.009) {
+                                    " • ₹%,.2f due".format(bill.pendingAmount)
+                                } else {
+                                    " • Due ${bill.dueDate}"
+                                },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
 
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    StatusBadge(status = bill.derivedStatus, language = language)
+                    Spacer(modifier = Modifier.width(8.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        /*
-                         * A member pays, they do not record payments. Marking a
-                         * bill settled is the committee's entry to make, so the
-                         * member is offered the QR to pay with and, once the
-                         * committee has receipted it, the receipt to keep.
-                         */
-                        if (bill.derivedStatus != PaymentStatus.PAID) {
-                            OutlinedButton(
-                                onClick = { selectedBillForQr = bill },
-                                shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, TealPrimary),
-                                modifier = Modifier.testTag("portal_upi_qr_btn_${bill.flatNumber}")
-                            ) {
-                                Icon(Icons.Default.QrCode, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(if (language == AppLanguage.MARATHI) "QR ने भरा" else "Pay by QR", style = MaterialTheme.typography.labelSmall, color = TealPrimary)
-                            }
-                        } else {
-                            // Only a settled bill has a receipt behind it.
-                            OutlinedButton(
-                                onClick = { selectedBillForReceipt = bill },
-                                shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, TealPrimary),
-                                modifier = Modifier.testTag("portal_receipt_btn_${bill.flatNumber}")
-                            ) {
-                                Icon(Icons.Default.Receipt, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(if (language == AppLanguage.MARATHI) "पावती पहा" else "View Receipt", style = MaterialTheme.typography.labelSmall, color = TealPrimary)
-                            }
+                    /*
+                     * A member pays, they do not record payments. Marking a
+                     * bill settled is the committee's entry to make, so the
+                     * member is offered the QR to pay with and, once the
+                     * committee has receipted it, the receipt to keep.
+                     */
+                    if (bill.derivedStatus != PaymentStatus.PAID) {
+                        OutlinedButton(
+                            onClick = { selectedBillForQr = bill },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, TealPrimary),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .heightIn(min = 32.dp)
+                                .testTag("portal_upi_qr_btn_${bill.flatNumber}")
+                        ) {
+                            Icon(
+                                Icons.Default.QrCode,
+                                contentDescription = null,
+                                tint = TealPrimary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (language == AppLanguage.MARATHI) "QR" else "Pay",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TealPrimary
+                            )
+                        }
+                    } else {
+                        // Only a settled bill has a receipt behind it.
+                        OutlinedButton(
+                            onClick = { selectedBillForReceipt = bill },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, TealPrimary),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .heightIn(min = 32.dp)
+                                .testTag("portal_receipt_btn_${bill.flatNumber}")
+                        ) {
+                            Icon(
+                                Icons.Default.Receipt,
+                                contentDescription = null,
+                                tint = TealPrimary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (language == AppLanguage.MARATHI) "पावती" else "Receipt",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TealPrimary
+                            )
                         }
                     }
                 }
             }
         }
+
+        // Every receipt this unit holds, to open, download or share.
+        if (myReceipts.isNotEmpty()) {
+            item {
+                Text(
+                    text = AppStrings.get("my_receipts", language),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.testTag("portal_receipts_heading")
+                )
+            }
+
+            items(myReceipts) { receipt ->
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, SlateOutlineVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("portal_receipt_row_${receipt.billMonth.replace(" ", "_")}")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = receipt.receiptNumber.ifBlank { receipt.billMonth },
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${receipt.billMonth} • ₹%,.2f".format(receipt.amountPaid) +
+                                    receipt.paidDate.takeIf { it.isNotBlank() }?.let { " • $it" }.orEmpty(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedButton(
+                            onClick = { selectedBillForReceipt = receipt },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, TealPrimary),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .heightIn(min = 32.dp)
+                                .testTag("portal_open_receipt_${receipt.billMonth.replace(" ", "_")}")
+                        ) {
+                            Icon(
+                                Icons.Default.Receipt,
+                                contentDescription = null,
+                                tint = TealPrimary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (language == AppLanguage.MARATHI) "उघडा" else "Open",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TealPrimary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** One line of the member's dues breakdown: a label left, a rupee figure right. */
+@Composable
+private fun PortalDuesLine(
+    label: String,
+    amount: Double,
+    color: Color = MaterialTheme.colorScheme.onSurface,
+    testTag: String = ""
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 1.dp)
+            .then(if (testTag.isBlank()) Modifier else Modifier.testTag(testTag)),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(text = label, style = MaterialTheme.typography.labelMedium)
+        Text(
+            text = "₹%,.2f".format(amount),
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = color
+        )
     }
 }
 
@@ -877,7 +1102,9 @@ fun GenerateVisitorPasscodeDialog(
         },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 OutlinedTextField(
@@ -967,7 +1194,10 @@ fun ChangePinDialog(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 OutlinedTextField(
                     value = newPin,
                     onValueChange = { newPin = it },

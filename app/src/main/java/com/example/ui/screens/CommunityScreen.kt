@@ -330,7 +330,13 @@ fun HelpdeskView(
     currentUser: Resident?,
     language: AppLanguage
 ) {
-    val complaints by viewModel.complaints.collectAsState()
+    /*
+     * Only what this user is allowed to see. A complaint is between the unit
+     * that raised it and the committee that has to act on it, so the committee
+     * gets every ticket and a member gets their own units' and nobody else's -
+     * Unit 304's leak was being shown to Unit 202.
+     */
+    val complaints by viewModel.visibleComplaints.collectAsState()
     val myUnits by viewModel.myUnits.collectAsState()
     val activeUnit by viewModel.activeUnit.collectAsState()
     var isFileComplaintOpen by remember { mutableStateOf(false) }
@@ -394,7 +400,8 @@ fun HelpdeskView(
     }
 
     val activeUnitNumber = (activeUnit ?: currentUser)?.flatNumber.orEmpty()
-    val visibleComplaints = if (myUnits.size > 1 && !showAllUnits) {
+    // Narrowed once more by the unit picker, for a member who holds several.
+    val listedComplaints = if (myUnits.size > 1 && !showAllUnits) {
         complaints.filter { it.flatNumber.equals(activeUnitNumber, ignoreCase = true) }
     } else {
         complaints
@@ -443,8 +450,8 @@ fun HelpdeskView(
             }
         }
 
-        // A member who owns several units can narrow the list to the one they
-        // are dealing with; the committee always sees every ticket.
+        // A member who owns several units can narrow the list further still;
+        // the committee, which sees every ticket, has nothing to narrow.
         if (myUnits.size > 1) {
             item {
                 Row(
@@ -477,7 +484,7 @@ fun HelpdeskView(
             }
         }
 
-        items(visibleComplaints) { complaint ->
+        items(listedComplaints) { complaint ->
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

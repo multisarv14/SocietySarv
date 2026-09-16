@@ -311,6 +311,19 @@ private fun MembersTab(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(14.dp)
                 ) {
+                    // The member's own photo, once they have uploaded one in
+                    // their profile. A vacant unit has nobody to show.
+                    if (member.ownerName.isNotBlank()) {
+                        Surface(shape = RoundedCornerShape(22.dp), color = TealPrimary) {
+                            MemberAvatar(
+                                photoBase64 = member.photoBase64,
+                                name = member.ownerName,
+                                size = 40,
+                                modifier = Modifier.testTag("member_photo_${member.flatNumber}")
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                    }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "${member.flatNumber} • ${member.ownerName.ifBlank { "Vacant unit" }}",
@@ -321,6 +334,13 @@ private fun MembersTab(
                                 MaterialTheme.colorScheme.onSurface
                             }
                         )
+                        if (member.coApplicantName.isNotBlank()) {
+                            Text(
+                                text = "Co-applicant: ${member.coApplicantName}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         if (member.tenantName.isNotBlank()) {
                             Text(
                                 text = "Tenant: ${member.tenantName}",
@@ -405,6 +425,7 @@ fun AddResidentDialog(
 
     var unitNumber by remember { mutableStateOf(existing?.flatNumber.orEmpty().ifBlank { unitNumbers.firstOrNull().orEmpty() }) }
     var ownerName by remember { mutableStateOf(existing?.ownerName.orEmpty()) }
+    var coApplicantName by remember { mutableStateOf(existing?.coApplicantName.orEmpty()) }
     var tenantName by remember { mutableStateOf(existing?.tenantName.orEmpty()) }
     var familyCount by remember { mutableStateOf((existing?.familyMemberCount ?: 1).toString()) }
     var phone by remember { mutableStateOf(existing?.contactNumber.orEmpty()) }
@@ -434,6 +455,7 @@ fun AddResidentDialog(
         val match = members.firstOrNull { it.flatNumber.equals(unitNumber, ignoreCase = true) }
         if (match != null && match.ownerName.isNotBlank()) {
             ownerName = match.ownerName
+            coApplicantName = match.coApplicantName
             tenantName = match.tenantName
             familyCount = match.familyMemberCount.toString()
             phone = match.contactNumber
@@ -511,6 +533,17 @@ fun AddResidentDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("resident_owner_input")
+                )
+                // The second name on the unit's paperwork. Members can fill
+                // this in themselves from their own profile when it is blank.
+                OutlinedTextField(
+                    value = coApplicantName,
+                    onValueChange = { coApplicantName = it },
+                    label = { Text("Co-Applicant Name (optional)") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("resident_co_applicant_input")
                 )
                 OutlinedTextField(
                     value = tenantName,
@@ -653,6 +686,7 @@ fun AddResidentDialog(
                         viewModel.updateResident(
                             existingMember.copy(
                                 ownerName = ownerName.trim(),
+                                coApplicantName = coApplicantName.trim(),
                                 tenantName = tenantName.trim(),
                                 familyMemberCount = familyCount.toIntOrNull() ?: 1,
                                 contactNumber = phone.trim(),
@@ -673,6 +707,7 @@ fun AddResidentDialog(
                             flatNumber = unitNumber,
                             wing = wing.trim().ifBlank { existingMember?.wing.orEmpty() },
                             ownerName = ownerName,
+                            coApplicantName = coApplicantName,
                             tenantName = tenantName,
                             tenantPhone = tenantContact,
                             rentAgreementBase64 = rentAgreement,

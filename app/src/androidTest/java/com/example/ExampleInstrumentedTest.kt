@@ -17,6 +17,7 @@ class ExampleInstrumentedTest {
   fun useAppContext() {
     // Context of the app under test.
     val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-    assertEquals("com.example", appContext.packageName)
+    // The sources live in com.example; the app ships as com.multisarv.societysarv.
+    assertEquals("com.multisarv.societysarv", appContext.packageName)
   }
 }

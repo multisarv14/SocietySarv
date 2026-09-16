@@ -56,6 +56,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.entity.MaintenanceBill
 import com.example.data.entity.SocietyInfo
+import com.example.data.entity.UnitDues
+import com.example.data.entity.pendingAmount
 import com.example.data.localization.AppLanguage
 import com.example.data.localization.AppStrings
 import com.example.ui.theme.SlateOutlineVariant
@@ -65,127 +67,48 @@ import com.example.ui.theme.StatusOverdueBg
 import com.example.ui.theme.StatusPaid
 import com.example.ui.theme.TealPrimary
 import com.example.ui.theme.TealPrimaryContainer
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
+import com.example.util.UpiQr
+import com.example.util.rememberBlobImage
 
 /**
- * Pure Kotlin QR Code Matrix generator based on standard QR Matrix patterns.
- * Generates an Android Bitmap without requiring external heavy JARs.
+ * What a member is shown when they tap Pay by QR.
+ *
+ * The amount asked for is the unit's whole position - this month, the arrears
+ * before it, less any credit already paid in - rather than the one bill that
+ * was tapped, because that is the figure a member actually settles.
+ *
+ * The QR itself is either the one the chairman uploaded or one generated from
+ * the society's UPI id, in that order: a society whose bank issues its own QR
+ * needs that exact image, and only a society without one falls back to the
+ * generated code.
  */
-object QrBitmapGenerator {
-    fun generateQrBitmap(content: String, sizePx: Int = 512): Bitmap {
-        val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
-        val matrixSize = 25
-        val modulePx = sizePx / matrixSize
-
-        // Derive deterministic pseudo-random visual matrix based on content hash and standard QR anchors
-        val contentBytes = content.toByteArray(StandardCharsets.UTF_8)
-        val hash = content.hashCode()
-
-        for (x in 0 until sizePx) {
-            for (y in 0 until sizePx) {
-                bitmap.setPixel(x, y, AndroidColor.WHITE)
-            }
-        }
-
-        fun drawFinderPattern(startX: Int, startY: Int) {
-            for (r in 0 until 7) {
-                for (c in 0 until 7) {
-                    val isBlack = (r == 0 || r == 6 || c == 0 || c == 6) || (r in 2..4 && c in 2..4)
-                    val color = if (isBlack) AndroidColor.BLACK else AndroidColor.WHITE
-                    for (px in (startX + c) * modulePx until (startX + c + 1) * modulePx) {
-                        for (py in (startY + r) * modulePx until (startY + r + 1) * modulePx) {
-                            if (px < sizePx && py < sizePx) {
-                                bitmap.setPixel(px, py, color)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Standard Top-Left, Top-Right, Bottom-Left Finder squares
-        drawFinderPattern(1, 1)
-        drawFinderPattern(matrixSize - 8, 1)
-        drawFinderPattern(1, matrixSize - 8)
-
-        // Alignment Timing lines
-        for (i in 8 until matrixSize - 8) {
-            val color = if (i % 2 == 0) AndroidColor.BLACK else AndroidColor.WHITE
-            for (px in i * modulePx until (i + 1) * modulePx) {
-                for (py in 6 * modulePx until 7 * modulePx) {
-                    if (px < sizePx && py < sizePx) bitmap.setPixel(px, py, color)
-                }
-                for (py in 6 * modulePx until 7 * modulePx) {
-                    if (px < sizePx && py < sizePx) bitmap.setPixel(py, px, color)
-                }
-            }
-        }
-
-        // Data cells modulated with content bytes & coordinates
-        for (r in 0 until matrixSize) {
-            for (c in 0 until matrixSize) {
-                val inTopLeft = r < 9 && c < 9
-                val inTopRight = r < 9 && c >= matrixSize - 9
-                val inBottomLeft = r >= matrixSize - 9 && c < 9
-                if (!inTopLeft && !inTopRight && !inBottomLeft) {
-                    val byteIdx = (r * matrixSize + c) % contentBytes.size
-                    val b = contentBytes[byteIdx].toInt()
-                    val isCellDark = ((b xor (r * 31 + c * 17 + hash)) and 1) == 0
-                    val cellColor = if (isCellDark) AndroidColor.BLACK else AndroidColor.WHITE
-                    for (px in c * modulePx until (c + 1) * modulePx) {
-                        for (py in r * modulePx until (r + 1) * modulePx) {
-                            if (px < sizePx && py < sizePx) {
-                                bitmap.setPixel(px, py, cellColor)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        return bitmap
-    }
-}
-
-/**
- * Builds standard NPCI UPI Payment URI string according to specifications:
- * upi://pay?pa=<vpa>&pn=<name>&am=<amount>&cu=INR&tn=<note>
- */
-fun buildUpiPaymentUri(
-    vpa: String,
-    payeeName: String,
-    amount: Double,
-    transactionNote: String
-): String {
-    val cleanVpa = if (vpa.isNotBlank()) vpa.trim() else "society.maintenance@sbi"
-    val cleanName = URLEncoder.encode(payeeName.ifBlank { "Housing Society" }, "UTF-8")
-    val cleanNote = URLEncoder.encode(transactionNote.ifBlank { "Maintenance Dues" }, "UTF-8")
-    val formattedAmount = "%.2f".format(amount)
-    return "upi://pay?pa=$cleanVpa&pn=$cleanName&am=$formattedAmount&cu=INR&tn=$cleanNote"
-}
-
 @Composable
 fun UpiQrPaymentDialog(
     bill: MaintenanceBill,
     society: SocietyInfo?,
     language: AppLanguage,
     onDismiss: () -> Unit,
-    onPaymentRecorded: () -> Unit
+    onPaymentRecorded: () -> Unit,
+    /**
+     * The unit's arrears, current month and advance credit. Left null, the
+     * dialog falls back to what this one bill still owes.
+     */
+    dues: UnitDues? = null
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
 
-    val dueAmount = (bill.totalAmount - bill.amountPaid).coerceAtLeast(0.0)
+    val thisBillPending = bill.pendingAmount
+    val dueAmount = dues?.netPayable ?: thisBillPending
     val societyName = society?.name ?: "Housing Society"
     // The society's real UPI id. Nothing is invented here - a QR built from a
     // made-up address takes the member's money nowhere.
     val societyVpa = society?.upiId.orEmpty().trim()
-    val hasUpiId = societyVpa.isNotBlank()
-    val transactionNote = "Maintenance Bill ${bill.flatNumber} ${bill.billMonth}"
+    val uploadedQr = rememberBlobImage(society?.paymentQrBase64)
+    val transactionNote = "Maintenance ${bill.flatNumber} ${bill.billMonth}"
 
-    val upiUri = remember(bill, society) {
-        buildUpiPaymentUri(
+    val upiUri = remember(societyVpa, societyName, dueAmount, transactionNote) {
+        UpiQr.paymentUri(
             vpa = societyVpa,
             payeeName = societyName,
             amount = dueAmount,
@@ -193,9 +116,19 @@ fun UpiQrPaymentDialog(
         )
     }
 
-    val qrBitmap = remember(upiUri) {
-        QrBitmapGenerator.generateQrBitmap(upiUri, sizePx = 400)
+    // Generating the symbol walks the whole matrix eight times to score the
+    // masks, so it is kept off recomposition and skipped entirely when an
+    // uploaded QR is going to be shown instead.
+    val generatedQr = remember(upiUri, uploadedQr) {
+        if (uploadedQr != null || upiUri == null) {
+            null
+        } else {
+            runCatching { UpiQr.bitmap(upiUri, sizePx = 512).asImageBitmap() }.getOrNull()
+        }
     }
+
+    val qrImage = uploadedQr ?: generatedQr
+    val hasQr = qrImage != null
 
     AlertDialog(
         modifier = DialogWidth,
@@ -242,9 +175,9 @@ fun UpiQrPaymentDialog(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // No UPI id, no QR. Showing one built from a made-up address
-                // would send the member's money nowhere.
-                if (!hasUpiId) {
+                // No UPI id and no uploaded image means no QR. Showing one
+                // built from a made-up address would send the money nowhere.
+                if (!hasQr) {
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         color = StatusOverdueBg,
@@ -268,8 +201,9 @@ fun UpiQrPaymentDialog(
                                 text = if (language == AppLanguage.MARATHI) {
                                     "अध्यक्षांना Society Profile मध्ये UPI आयडी भरायला सांगा. तोपर्यंत बँक तपशिलाने भरा."
                                 } else {
-                                    "Ask the Chairman to add the society's UPI ID under Society " +
-                                        "Profile. Until then, pay using the bank details."
+                                    "Ask the Chairman to add the society's UPI ID, or upload the " +
+                                        "society's own payment QR, under Society Profile. Until " +
+                                        "then, pay using the bank details."
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -290,9 +224,13 @@ fun UpiQrPaymentDialog(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Image(
-                                bitmap = qrBitmap.asImageBitmap(),
+                                bitmap = qrImage!!,
                                 contentDescription = "UPI QR Code",
-                                modifier = Modifier.size(180.dp)
+                                modifier = Modifier
+                                    .size(180.dp)
+                                    .testTag(
+                                        if (uploadedQr != null) "uploaded_upi_qr" else "generated_upi_qr"
+                                    )
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
@@ -315,20 +253,40 @@ fun UpiQrPaymentDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = if (language == AppLanguage.MARATHI) "भरणा रक्कम (Amount)" else "Payable Amount",
-                                style = MaterialTheme.typography.bodySmall
+                        /*
+                         * The whole position, not just the bill that was
+                         * tapped: what this month came to, what was owed before
+                         * it, and the credit the member is already in. A member
+                         * paying off arrears needs to see all three or the
+                         * amount on the QR looks wrong to them.
+                         */
+                        AmountRow(
+                            label = if (language == AppLanguage.MARATHI) {
+                                "${bill.billMonth} चे बिल"
+                            } else {
+                                "${bill.billMonth} bill"
+                            },
+                            amount = thisBillPending
+                        )
+                        if (dues != null && dues.previousPending > 0.009) {
+                            AmountRow(
+                                label = if (language == AppLanguage.MARATHI) {
+                                    "मागील थकबाकी"
+                                } else {
+                                    "Previous pending"
+                                },
+                                amount = dues.previousPending
                             )
-                            Text(
-                                text = "₹%,.2f".format(dueAmount),
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = StatusOverdue
-                                )
+                        }
+                        if (dues != null && dues.excessCredit > 0.009) {
+                            AmountRow(
+                                label = if (language == AppLanguage.MARATHI) {
+                                    "जमा (जास्तीची) रक्कम"
+                                } else {
+                                    "Advance credit"
+                                },
+                                amount = -dues.excessCredit,
+                                color = StatusPaid
                             )
                         }
 
@@ -336,33 +294,55 @@ fun UpiQrPaymentDialog(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = if (language == AppLanguage.MARATHI) "संस्था UPI आयडी" else "Society UPI VPA",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = societyVpa,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                                    color = TealPrimary
-                                )
-                            }
-                            IconButton(
-                                onClick = {
-                                    clipboardManager.setText(AnnotatedString(societyVpa))
-                                },
-                                modifier = Modifier.size(32.dp)
+                            Text(
+                                text = if (language == AppLanguage.MARATHI) "एकूण भरणा रक्कम" else "Total Payable",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Text(
+                                text = "₹%,.2f".format(dueAmount),
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = StatusOverdue
+                                ),
+                                modifier = Modifier.testTag("upi_total_payable")
+                            )
+                        }
+
+                        if (societyVpa.isNotBlank()) {
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.ContentCopy,
-                                    contentDescription = "Copy UPI VPA",
-                                    tint = TealPrimary,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (language == AppLanguage.MARATHI) "संस्था UPI आयडी" else "Society UPI VPA",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = societyVpa,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                        color = TealPrimary
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(societyVpa))
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "Copy UPI VPA",
+                                        tint = TealPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -375,15 +355,18 @@ fun UpiQrPaymentDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    // Only offered when there is a real address behind it. A
+                    // society that only uploaded an image has nothing for a UPI
+                    // app to open, and a dead button is worse than none.
                     OutlinedButton(
+                        enabled = upiUri != null,
                         onClick = {
+                            val target = upiUri ?: return@OutlinedButton
                             val intent = Intent(Intent.ACTION_VIEW).apply {
-                                data = Uri.parse(upiUri)
+                                data = Uri.parse(target)
                             }
-                            try {
+                            runCatching {
                                 context.startActivity(Intent.createChooser(intent, "Pay Maintenance via UPI"))
-                            } catch (e: Exception) {
-                                // Fallback
                             }
                         },
                         shape = RoundedCornerShape(8.dp),
@@ -408,12 +391,20 @@ fun UpiQrPaymentDialog(
                                 type = "text/plain"
                                 putExtra(
                                     Intent.EXTRA_TEXT,
-                                    "Payment Request for ${bill.residentName} (${bill.flatNumber})\n" +
-                                        "Amount: ₹%,.2f\n".format(dueAmount) +
-                                        "UPI ID: $societyVpa\nNote: $transactionNote\nPay Link: $upiUri"
+                                    buildString {
+                                        append("Payment Request for ${bill.residentName} (${bill.flatNumber})\n")
+                                        append("Amount: ₹%,.2f\n".format(dueAmount))
+                                        if (societyVpa.isNotBlank()) append("UPI ID: $societyVpa\n")
+                                        append("Note: $transactionNote")
+                                        if (upiUri != null) append("\nPay Link: $upiUri")
+                                    }
                                 )
                             }
-                            context.startActivity(Intent.createChooser(shareIntent, "Share Payment QR Details"))
+                            runCatching {
+                                context.startActivity(
+                                    Intent.createChooser(shareIntent, "Share Payment QR Details")
+                                )
+                            }
                         },
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
@@ -452,4 +443,24 @@ fun UpiQrPaymentDialog(
             }
         }
     )
+}
+
+/** One line of the payable breakdown: a label on the left, a rupee figure right. */
+@Composable
+private fun AmountRow(
+    label: String,
+    amount: Double,
+    color: Color = MaterialTheme.colorScheme.onSurface
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(text = label, style = MaterialTheme.typography.bodySmall)
+        Text(
+            text = "₹%,.2f".format(amount),
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+            color = color
+        )
+    }
 }

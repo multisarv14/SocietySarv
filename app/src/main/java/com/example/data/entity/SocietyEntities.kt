@@ -206,6 +206,15 @@ data class SocietyInfo(
      * built from this - without it there is nothing real to pay into.
      */
     val upiId: String = "",
+    /**
+     * A payment QR the chairman uploaded, as a Base64 blob.
+     *
+     * Some societies bank with a provider whose QR carries more than the VPA -
+     * a merchant id, a signature - and one built from the UPI id alone will not
+     * do. When this is set it is the QR members are shown; otherwise the app
+     * generates one from [upiId].
+     */
+    val paymentQrBase64: String = "",
     val currentBalanceCash: Double,
     val currentBalanceBank: Double,
     val lateFeePercentPerMonth: Double = 2.0,
@@ -347,15 +356,24 @@ data class TreasuryBalance(val cash: Double, val bank: Double) {
 fun SocietyInfo?.treasuryBalance(
     bills: List<MaintenanceBill>,
     expenses: List<ExpenseRecord>,
-    revenues: List<NonFeeRevenue>
+    revenues: List<NonFeeRevenue>,
+    /**
+     * Units holding advance credit. The society has that money in hand even
+     * though no bill carries it yet, so it is counted here and drops out again
+     * the moment the credit is set against a bill.
+     */
+    advanceHolders: List<Resident> = emptyList()
 ): TreasuryBalance {
     fun isCash(mode: PaymentMode?) = mode == PaymentMode.CASH
 
+    val heldAdvances = advanceHolders.filter { it.advanceBalance > 0.0 }
     val cashIn = bills.filter { isCash(it.paymentMode) }.sumOf { it.amountPaid } +
-        revenues.filter { isCash(it.paymentMode) }.sumOf { it.amount }
+        revenues.filter { isCash(it.paymentMode) }.sumOf { it.amount } +
+        heldAdvances.filter { isCash(it.advanceMode) }.sumOf { it.advanceBalance }
     val cashOut = expenses.filter { isCash(it.paymentMode) }.sumOf { it.amount }
     val bankIn = bills.filterNot { isCash(it.paymentMode) }.sumOf { it.amountPaid } +
-        revenues.filterNot { isCash(it.paymentMode) }.sumOf { it.amount }
+        revenues.filterNot { isCash(it.paymentMode) }.sumOf { it.amount } +
+        heldAdvances.filterNot { isCash(it.advanceMode) }.sumOf { it.advanceBalance }
     val bankOut = expenses.filterNot { isCash(it.paymentMode) }.sumOf { it.amount }
 
     return TreasuryBalance(
@@ -388,6 +406,12 @@ data class Resident(
     val flatNumber: String,
     val wing: String,
     val ownerName: String,
+    /**
+     * The second name on the unit's paperwork - a spouse, a parent, a business
+     * partner. Societies need it on a receipt and in the register, and only the
+     * member reliably knows it, so the member can fill it in themselves.
+     */
+    val coApplicantName: String = "",
     val tenantName: String = "",
     /** The tenant's own mobile number, when the flat is let out. */
     val tenantContact: String = "",
@@ -416,6 +440,20 @@ data class Resident(
     val flatType: FlatType = FlatType.TWO_BHK,
     val squareFeet: Int = 0,
     val balanceDue: Double = 0.0,
+    /**
+     * Money this unit has paid over and above what it owed.
+     *
+     * A member who hands over a round figure often overshoots the arrears. The
+     * difference is held here and taken off the next bill raised for the unit,
+     * so it is neither lost nor refunded in cash.
+     */
+    val advanceBalance: Double = 0.0,
+    /**
+     * Which account the held advance went into, so the society's balance counts
+     * it in the right place until it is set against a bill. It follows the most
+     * recent overpayment - a unit rarely holds credit from two receipts at once.
+     */
+    val advanceMode: PaymentMode = PaymentMode.BANK_TRANSFER,
     val isOwnerLiving: Boolean = true,
     /** Member photo as a Base64 blob (empty when none uploaded). */
     val photoBase64: String = "",
@@ -480,6 +518,49 @@ const val RENT_AGREEMENT_MAX_BYTES: Int = 600 * 1024
 /** Staff sign in with their staff code; residents with their flat number. */
 val Resident.loginIdentifier: String
     get() = flatNumber
+
+/** True for the people the membership register is about, as opposed to staff. */
+val UserRole.isMember: Boolean
+    get() = this == UserRole.RESIDENT || this == UserRole.TENANT
+
+/**
+ * Applies what someone typed into their own profile form.
+ *
+ * A member fills in blanks; they do not rewrite the register. Their name, unit,
+ * mobile number and the rest are the society's own record of who lives where,
+ * and a register a member can quietly change is not a register - a wrong mobile
+ * number on it is a member the committee can no longer reach. So when
+ * [addOnly] is set, every detail already on file is kept exactly as it is,
+ * however the form was filled in, and only genuinely empty fields take what was
+ * typed.
+ *
+ * The committee and the staff edit their own details freely; the rule is about
+ * the membership register, not about everybody's contact card.
+ */
+fun Resident.withProfileEdits(
+    ownerName: String,
+    coApplicantName: String,
+    contactNumber: String,
+    email: String,
+    photoBase64: String,
+    addOnly: Boolean
+): Resident {
+    fun settle(existing: String, entered: String): String = when {
+        !addOnly -> entered.trim()
+        existing.isNotBlank() -> existing
+        else -> entered.trim()
+    }
+
+    return copy(
+        // A name is the one thing that can never be blanked: a unit with no
+        // name against it reads as vacant everywhere else in the app.
+        ownerName = settle(this.ownerName, ownerName).ifBlank { this.ownerName },
+        coApplicantName = settle(this.coApplicantName, coApplicantName),
+        contactNumber = settle(this.contactNumber, contactNumber),
+        email = settle(this.email, email),
+        photoBase64 = settle(this.photoBase64, photoBase64)
+    )
+}
 
 // 3. Maintenance Billing & Collection -> Firestore collection "maintenance_bills"
 data class MaintenanceBill(
