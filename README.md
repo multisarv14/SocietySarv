@@ -1,22 +1,69 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
-
 # Society Sarv
 
 Society management app for residents, security teams, and committee members.
+Built with **Flutter**, backed by **Cloud Firestore** (named database
+`societysarv-app-db` in Firebase project `multisarv-mobileapps`).
 
-View your app in AI Studio: https://ai.studio/apps/5ffd08c1-7da0-422d-a539-25b4241ec744
+> This branch is the Flutter port of the original Kotlin / Jetpack Compose app
+> (still on `main`). The Firestore schema, collection names, field names and
+> enum strings are unchanged, so both apps read and write the same data.
 
-## Run Locally
+## Run locally
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+Prerequisites: Flutter 3.44+ (Dart 3.12+), Android SDK, a device or emulator.
 
+```bash
+flutter pub get
+flutter run            # debug build on the connected device
+flutter test           # unit tests (billing, payment allocation, UPI URI, ...)
+```
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
-7. If you have already published your app in AI Studio, please [request upload key reset](https://support.google.com/googleplay/android-developer/answer/9842756#zippy=%2Crequest-an-upload-key-reset) in Google Play Console.
+`android/app/google-services.json` is committed, so Firebase works out of the
+box on Android. iOS needs `ios/Runner/GoogleService-Info.plist` from the
+Firebase console before it will start.
+
+## Release build (Play Store)
+
+The application id is `com.multisarv.societysarv`, the same as the Kotlin app,
+so the Flutter build installs as an update over it. The version lives in
+`pubspec.yaml` (`version: 1.6.0+12` → versionName 1.6.0, versionCode 12).
+
+Signing reads `keystore.properties` at the repository root (git-ignored), or
+the `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` environment
+variables:
+
+```properties
+storeFile=societysarv-release-key.jks
+storePassword=...
+keyAlias=upload
+keyPassword=...
+```
+
+```bash
+flutter build appbundle --release   # build/app/outputs/bundle/release/app-release.aab
+flutter build apk --release         # build/app/outputs/flutter-apk/app-release.apk
+```
+
+Without a keystore the release build falls back to the debug key.
+
+Phone OTP (Forgot PIN) needs the SHA-1/SHA-256 of the signing key registered
+in the Firebase console, exactly as before.
+
+## Project layout
+
+```
+lib/
+  main.dart                    app shell, bottom navigation by role
+  data/                        models, Firestore mappers, repository, session, OTP
+  state/society_view_model.dart  all business logic (ChangeNotifier + Provider)
+  l10n/                        English / Hindi / Marathi strings, location lists
+  ui/theme/                    colours and Material 3 theme
+  ui/components/               shared widgets (top bar, badges, receipt, UPI QR)
+  ui/screens/                  one file per tab, plus auth and profile
+  util/                        formatting, image blobs, UPI QR, receipt/ledger PDFs
+test/                          pure-logic unit tests
+firestore.rules, firestore.indexes.json, firebase.json   backend config (unchanged)
+```
+
+See `README-FIREBASE.md` for the backend setup and `PLAY-STORE-DEMO-LOGIN.md`
+for the Play Store review login.

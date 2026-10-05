@@ -1,0 +1,11 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+
+linter:
+  rules:
+    # Enum values mirror the names persisted in Firestore by the Kotlin app
+    # ("CHAIRMAN", "UNPAID", ...), so they stay UPPER_CASE.
+    constant_identifier_names: false

@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Sampled from the teal ring of the SocietySarv logo, so on launchers
-         that use a squircle or square mask the corners around the round logo
-         read as part of the badge instead of a white box. -->
-    <color name="ic_launcher_background">#027C75</color>
-</resources>

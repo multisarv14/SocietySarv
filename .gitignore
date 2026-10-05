@@ -22,3 +22,21 @@ societysarv-release-key.jks
 *.jks
 *.keystore
 keystore.properties
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+build/
+*.iml
+android/local.properties
+android/.gradle
+android/app/debug
+android/app/profile
+android/app/release
+ios/Pods/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+.idea/
