@@ -161,8 +161,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> with SingleTicker
               tabAlignment: TabAlignment.start,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               labelColor: AppColors.tealPrimary,
-              unselectedLabelColor: AppColors.tealPrimary,
-              indicatorColor: AppColors.tealPrimary,
+              unselectedLabelColor: AppColors.textSecondary,
               labelStyle: labelStyle?.copyWith(fontWeight: FontWeight.bold),
               unselectedLabelStyle: labelStyle?.copyWith(fontWeight: FontWeight.w500),
               tabs: [
@@ -171,7 +170,9 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> with SingleTicker
               ],
             ),
           ),
-          Expanded(child: body),
+          Expanded(
+            child: FadeThroughSwitcher(child: KeyedSubtree(key: ValueKey('maint_$_selectedSubTab'), child: body)),
+          ),
         ],
       ),
     );
@@ -201,7 +202,7 @@ class _MaintenanceBillingViewState extends State<MaintenanceBillingView> {
   }
 
   void _openEditBill(SocietyViewModel vm, MaintenanceBill bill) {
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (dialogContext) => EditBillDialog(
         bill: bill,
@@ -224,7 +225,7 @@ class _MaintenanceBillingViewState extends State<MaintenanceBillingView> {
 
   void _confirmDeleteBill(SocietyViewModel vm, MaintenanceBill bill) {
     final language = vm.language;
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         insetPadding: dialogInsetPadding(dialogContext),
@@ -242,7 +243,7 @@ class _MaintenanceBillingViewState extends State<MaintenanceBillingView> {
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: Text(tr('cancel', language)),
           ),
-          FilledButton(
+          AppButton.filled(
             key: const Key('confirm_delete_bill_btn'),
             style: _dangerButtonStyle(),
             onPressed: () {
@@ -257,7 +258,7 @@ class _MaintenanceBillingViewState extends State<MaintenanceBillingView> {
   }
 
   void _openRecordPayment(SocietyViewModel vm, MaintenanceBill bill) {
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (dialogContext) => RecordPaymentDialog(
         bill: bill,
@@ -272,14 +273,14 @@ class _MaintenanceBillingViewState extends State<MaintenanceBillingView> {
   }
 
   void _openGenerateBill() {
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (dialogContext) => GenerateBillDialog(onDismiss: () => Navigator.of(dialogContext).pop()),
     );
   }
 
   void _openBulkCollect() {
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (dialogContext) => BulkCollectionDialog(onDismiss: () => Navigator.of(dialogContext).pop()),
     );
@@ -289,7 +290,7 @@ class _MaintenanceBillingViewState extends State<MaintenanceBillingView> {
     final language = vm.language;
     final months = outstandingRun.map((m) => m.month).toSet().length;
     final units = outstandingRun.map((m) => m.unit.flatNumber).toSet().length;
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         insetPadding: dialogInsetPadding(dialogContext),
@@ -309,7 +310,7 @@ class _MaintenanceBillingViewState extends State<MaintenanceBillingView> {
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: Text(tr('cancel', language)),
           ),
-          FilledButton(
+          AppButton.filled(
             key: const Key('confirm_bulk_bills_btn'),
             style: _tealButtonStyle(),
             onPressed: () {
@@ -426,7 +427,7 @@ class _MaintenanceBillingViewState extends State<MaintenanceBillingView> {
                   style: textTheme.bodySmall?.copyWith(color: onSurfaceVariant),
                 ),
                 const SizedBox(height: 10),
-                FilledButton.icon(
+                AppButton.filledIcon(
                   key: const Key('bulk_generate_bills_btn'),
                   style: _tealButtonStyle(radius: 8),
                   onPressed: () => _confirmBulkBills(vm, outstandingRun),
@@ -446,10 +447,10 @@ class _MaintenanceBillingViewState extends State<MaintenanceBillingView> {
       padding: const EdgeInsets.all(16),
       itemCount: header.length + filteredBills.length,
       separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
+      itemBuilder: appEntrance((context, index) {
         if (index < header.length) return header[index];
         return _billCard(context, vm, filteredBills[index - header.length], canEdit);
-      },
+      }),
     );
   }
 
@@ -544,7 +545,7 @@ class _MaintenanceBillingViewState extends State<MaintenanceBillingView> {
                     if (status != PaymentStatus.PAID)
                       // Compact: it sits beside the edit and delete
                       // icons, so it takes only the room it needs.
-                      FilledButton.icon(
+                      AppButton.filledIcon(
                         key: Key('collect_payment_btn_${bill.flatNumber}'),
                         style: _tealButtonStyle(
                           radius: 8,
@@ -681,7 +682,7 @@ class BillsFilterAndActionsRow extends StatelessWidget {
                   softWrap: false,
                 ),
               ),
-            FilledButton.icon(
+            AppButton.filledIcon(
               key: const Key('generate_bill_btn'),
               style: _tealButtonStyle(radius: 8, padding: buttonPadding),
               onPressed: onGenerateBill,
@@ -740,7 +741,7 @@ class _ReceiptListViewState extends State<ReceiptListView> {
   }
 
   void _editReceipt(SocietyViewModel vm, MaintenanceBill receipt) {
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (dialogContext) => RecordPaymentDialog(
         bill: receipt,
@@ -759,7 +760,7 @@ class _ReceiptListViewState extends State<ReceiptListView> {
 
   void _confirmDelete(SocietyViewModel vm, MaintenanceBill receipt) {
     final language = vm.language;
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         insetPadding: dialogInsetPadding(dialogContext),
@@ -778,7 +779,7 @@ class _ReceiptListViewState extends State<ReceiptListView> {
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: Text(tr('cancel', language)),
           ),
-          FilledButton(
+          AppButton.filled(
             key: const Key('confirm_delete_receipt_btn'),
             style: _dangerButtonStyle(),
             onPressed: () {
@@ -823,9 +824,9 @@ class _ReceiptListViewState extends State<ReceiptListView> {
         style: textTheme.bodySmall?.copyWith(color: onSurfaceVariant),
       ),
       if (receipts.isEmpty)
-        Text(
-          _isMr(language) ? 'अजून एकही पावती तयार झालेली नाही.' : 'No receipts have been issued yet.',
-          style: textTheme.bodySmall?.copyWith(color: onSurfaceVariant),
+        EmptyState(
+          icon: Icons.receipt_long_rounded,
+          message: _isMr(language) ? 'अजून एकही पावती तयार झालेली नाही.' : 'No receipts have been issued yet.',
         ),
     ];
 
@@ -833,10 +834,10 @@ class _ReceiptListViewState extends State<ReceiptListView> {
       padding: const EdgeInsets.all(16),
       itemCount: header.length + receipts.length,
       separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
+      itemBuilder: appEntrance((context, index) {
         if (index < header.length) return header[index];
         return _receiptCard(context, vm, receipts[index - header.length]);
-      },
+      }),
     );
   }
 
@@ -1151,7 +1152,7 @@ class _TariffEditorState extends State<_TariffEditor> {
           'floor inventory to set tariffs wing by wing.',
           style: textTheme.bodySmall?.copyWith(color: onSurfaceVariant),
         ),
-      FilledButton.icon(
+      AppButton.filledIcon(
         key: const Key('save_tariffs_btn'),
         style: _tealButtonStyle(radius: 10),
         onPressed: () {
@@ -1174,7 +1175,7 @@ class _TariffEditorState extends State<_TariffEditor> {
       padding: const EdgeInsets.all(16),
       itemCount: children.length,
       separatorBuilder: (_, _) => const SizedBox(height: 14),
-      itemBuilder: (_, i) => children[i],
+      itemBuilder: (_, i) => AppEntrance(index: i, child: children[i]),
     );
   }
 
@@ -1500,7 +1501,7 @@ class _ChargeSetupEditorState extends State<_ChargeSetupEditor> {
             ),
 
           if (canEdit) ...[
-            FilledButton.icon(
+            AppButton.filledIcon(
               key: const Key('save_charge_setup_btn'),
               style: _tealButtonStyle(radius: 10),
               onPressed: isBalanced
@@ -1682,7 +1683,7 @@ class _LateFeeRulesViewState extends State<LateFeeRulesView> {
                 decoration: const InputDecoration(labelText: 'Grace Period Days (सवलतीचे दिवस)'),
               ),
               const SizedBox(height: 16),
-              FilledButton.icon(
+              AppButton.filledIcon(
                 key: const Key('save_late_fee_btn'),
                 style: _tealButtonStyle(radius: 10),
                 onPressed: () {
@@ -1721,7 +1722,7 @@ class ResidentDirectoryView extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       itemCount: residents.length + 1,
       separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
+      itemBuilder: appEntrance((context, index) {
         if (index == 0) {
           return Text(
             tr('member_directory', language),
@@ -1786,7 +1787,7 @@ class ResidentDirectoryView extends StatelessWidget {
             ),
           ),
         );
-      },
+      }),
     );
   }
 }
@@ -1912,7 +1913,7 @@ class _RecordPaymentDialogState extends State<RecordPaymentDialog> {
       ),
       actions: [
         TextButton(onPressed: widget.onDismiss, child: Text(tr('cancel', language))),
-        FilledButton(
+        AppButton.filled(
           key: const Key('submit_record_payment_btn'),
           style: _tealButtonStyle(),
           onPressed: () {
@@ -2357,7 +2358,7 @@ class _GenerateBillDialogState extends State<GenerateBillDialog> {
       ),
       actions: [
         TextButton(onPressed: widget.onDismiss, child: Text(tr('cancel', language))),
-        FilledButton(
+        AppButton.filled(
           key: const Key('bill_submit_btn'),
           style: _tealButtonStyle(),
           onPressed: resident == null
@@ -2542,7 +2543,7 @@ class _EditBillDialogState extends State<EditBillDialog> {
       ),
       actions: [
         TextButton(onPressed: widget.onDismiss, child: Text(tr('cancel', language))),
-        FilledButton(
+        AppButton.filled(
           key: const Key('edit_bill_save_btn'),
           style: _tealButtonStyle(),
           onPressed: () {
@@ -2965,7 +2966,7 @@ class _BulkCollectionDialogState extends State<BulkCollectionDialog> {
       content: _dialogBody(spacing: 10, maxHeight: 460, children: body),
       actions: [
         TextButton(onPressed: widget.onDismiss, child: Text(tr('cancel', language))),
-        FilledButton(
+        AppButton.filled(
           key: const Key('bulk_collect_save_btn'),
           style: _tealButtonStyle(radius: 8),
           onPressed: unitsWithDues.isNotEmpty && amount > 0.0

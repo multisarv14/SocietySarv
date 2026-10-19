@@ -16,6 +16,7 @@ import '../../data/models.dart';
 import '../../l10n/app_strings.dart';
 import '../../util/format.dart';
 import '../theme/app_colors.dart';
+import 'app_motion.dart';
 
 /// Animated card container that provides a subtle slide-in and fade-in
 /// animation when navigating between sections.
@@ -32,13 +33,15 @@ class AnimatedSectionCard extends StatefulWidget {
 class _AnimatedSectionCardState extends State<AnimatedSectionCard> with SingleTickerProviderStateMixin {
   // Fade runs 350ms and the slide 400ms, both after the same delay.
   late final AnimationController _controller =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 560));
   late final Animation<double> _fade = CurvedAnimation(
     parent: _controller,
-    curve: const Interval(0, 350 / 400, curve: Curves.easeInOut),
+    curve: const Interval(0, 0.7, curve: Curves.easeOut),
   );
-  late final Animation<Offset> _slide = Tween<Offset>(begin: const Offset(0, 1 / 6), end: Offset.zero)
-      .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+  late final Animation<Offset> _slide = Tween<Offset>(begin: const Offset(0, 0.12), end: Offset.zero)
+      .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+  late final Animation<double> _scale = Tween<double>(begin: 0.97, end: 1)
+      .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
   Timer? _delay;
 
   @override
@@ -64,7 +67,10 @@ class _AnimatedSectionCardState extends State<AnimatedSectionCard> with SingleTi
   Widget build(BuildContext context) {
     return FadeTransition(
       opacity: _fade,
-      child: SlideTransition(position: _slide, child: widget.child),
+      child: SlideTransition(
+        position: _slide,
+        child: ScaleTransition(scale: _scale, child: widget.child),
+      ),
     );
   }
 }
@@ -141,7 +147,7 @@ class _CardHeader extends StatelessWidget {
         Container(
           width: 36,
           height: 36,
-          decoration: BoxDecoration(color: iconBackground, borderRadius: BorderRadius.circular(10)),
+          decoration: BoxDecoration(color: iconBackground, borderRadius: BorderRadius.circular(12)),
           alignment: Alignment.center,
           child: Icon(icon, color: iconColor, size: 20),
         ),
@@ -178,19 +184,17 @@ class _DashboardCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
+    return Container(
+      key: Key(testTag),
       width: double.infinity,
-      child: Card(
-        key: Key(testTag),
-        margin: EdgeInsets.zero,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
-        elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: AppColors.borderLight),
-        ),
-        child: Padding(padding: const EdgeInsets.all(16), child: child),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.borderLight),
+        boxShadow: const [BoxShadow(color: Color(0x0F0F172A), blurRadius: 18, offset: Offset(0, 6))],
       ),
+      child: child,
     );
   }
 }
@@ -258,8 +262,9 @@ class MaintenanceStatusDashboard extends StatelessWidget {
               children: [
                 Text(label, style: textTheme.labelSmall?.copyWith(color: labelColor)),
                 const SizedBox(height: 2),
-                Text(
-                  rupees0(amount),
+                AnimatedAmount(
+                  amount: amount,
+                  format: rupees0,
                   style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold, color: valueColor),
                 ),
               ],
@@ -347,14 +352,9 @@ class MaintenanceStatusDashboard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 8,
-              color: progress >= 0.75 ? AppColors.successGreen : AppColors.tealPrimary,
-              backgroundColor: AppColors.surfaceVariant,
-            ),
+          AnimatedProgressBar(
+            value: progress,
+            color: progress >= 0.75 ? AppColors.successGreen : AppColors.tealPrimary,
           ),
         ],
       ),

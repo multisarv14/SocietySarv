@@ -86,8 +86,7 @@ class _AccountingScreenState extends State<AccountingScreen> with SingleTickerPr
               tabAlignment: TabAlignment.start,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               labelColor: AppColors.tealPrimary,
-              unselectedLabelColor: AppColors.tealPrimary,
-              indicatorColor: AppColors.tealPrimary,
+              unselectedLabelColor: AppColors.textSecondary,
               labelStyle: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.bold),
               unselectedLabelStyle: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w500),
               tabs: [
@@ -96,7 +95,9 @@ class _AccountingScreenState extends State<AccountingScreen> with SingleTickerPr
               ],
             ),
           ),
-          Expanded(child: body),
+          Expanded(
+            child: FadeThroughSwitcher(child: KeyedSubtree(key: ValueKey('acc_$_selectedSubTab'), child: body)),
+          ),
         ],
       ),
     );
@@ -159,7 +160,6 @@ InputDecoration _outlined(String label, {String? hint, Widget? prefixIcon, Strin
   hintText: hint,
   prefixIcon: prefixIcon,
   errorText: errorText,
-  border: const OutlineInputBorder(),
 );
 
 // ------------------------------------------------------- member balance
@@ -274,7 +274,7 @@ class BalanceSheetView extends StatelessWidget {
   Future<void> _showExportDialog(BuildContext context) {
     final viewModel = context.read<SocietyViewModel>();
     final exportText = viewModel.generateExportSummary();
-    return showDialog<void>(
+    return showAppDialog<void>(
       context: context,
       builder: (dialogContext) {
         final textTheme = Theme.of(dialogContext).textTheme;
@@ -301,7 +301,7 @@ class BalanceSheetView extends StatelessWidget {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: Text(tr('close', language))),
-            FilledButton(
+            AppButton.filled(
               style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
               onPressed: () async {
                 Navigator.of(dialogContext).pop();
@@ -533,7 +533,7 @@ class BalanceSheetView extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       itemCount: items.length,
       separatorBuilder: (_, _) => const SizedBox(height: 14),
-      itemBuilder: (_, index) => items[index],
+      itemBuilder: (_, index) => AppEntrance(index: index, child: items[index]),
     );
   }
 }
@@ -572,7 +572,7 @@ class _MemberLedgerViewState extends State<MemberLedgerView> {
 
   Future<void> _openMember(Resident member) async {
     MaintenanceBill? receiptBill;
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       builder: (_) => MemberLedgerDetailDialog(
         member: member,
@@ -688,7 +688,7 @@ class _MemberLedgerViewState extends State<MemberLedgerView> {
       padding: const EdgeInsets.all(16),
       itemCount: header.length + visibleMembers.length,
       separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
+      itemBuilder: appEntrance((context, index) {
         if (index < header.length) return header[index];
         final resident = visibleMembers[index - header.length];
         final key = resident.flatNumber.toUpperCase();
@@ -772,7 +772,7 @@ class _MemberLedgerViewState extends State<MemberLedgerView> {
             ),
           ),
         );
-      },
+      }),
     );
   }
 }
@@ -947,7 +947,7 @@ class _MemberLedgerDetailDialogState extends State<MemberLedgerDetailDialog> {
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: FilledButton.icon(
+              child: AppButton.filledIcon(
                 key: const Key('ledger_share_pdf_btn'),
                 onPressed: () async {
                   final failure = await LedgerPdf.share(member, ordered, widget.society);
@@ -996,7 +996,7 @@ class _MemberLedgerDetailDialogState extends State<MemberLedgerDetailDialog> {
         ),
       ),
       actions: [
-        FilledButton(
+        AppButton.filled(
           style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
           onPressed: () => Navigator.of(context).pop(),
           child: Text(tr('close', language)),
@@ -1044,7 +1044,7 @@ class ExpenseJournalView extends StatelessWidget {
 
   void _openExpenseDialog(BuildContext context, ExpenseRecord? editing) {
     final viewModel = context.read<SocietyViewModel>();
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (_) => AddExpenseDialog(
         language: language,
@@ -1087,7 +1087,7 @@ class ExpenseJournalView extends StatelessWidget {
 
   void _confirmDelete(BuildContext context, ExpenseRecord expense) {
     final viewModel = context.read<SocietyViewModel>();
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (dialogContext) {
         final textTheme = Theme.of(dialogContext).textTheme;
@@ -1106,7 +1106,7 @@ class ExpenseJournalView extends StatelessWidget {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: Text(tr('cancel', language))),
-            FilledButton(
+            AppButton.filled(
               key: const Key('confirm_delete_expense_btn'),
               style: FilledButton.styleFrom(backgroundColor: AppColors.statusOverdue),
               onPressed: () {
@@ -1140,7 +1140,7 @@ class ExpenseJournalView extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         if (canEdit)
-          FilledButton.icon(
+          AppButton.filledIcon(
             key: const Key('add_expense_modal_btn'),
             onPressed: () => _openExpenseDialog(context, null),
             style: FilledButton.styleFrom(
@@ -1159,7 +1159,7 @@ class ExpenseJournalView extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       itemCount: expenses.length + 1,
       separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
+      itemBuilder: appEntrance((context, index) {
         if (index == 0) return header;
         final expense = expenses[index - 1];
         return _OutlinedCard(
@@ -1248,7 +1248,7 @@ class ExpenseJournalView extends StatelessWidget {
             ),
           ),
         );
-      },
+      }),
     );
   }
 }
@@ -1279,10 +1279,10 @@ class NonFeeRevenueView extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         if (canEdit)
-          FilledButton.icon(
+          AppButton.filledIcon(
             key: const Key('add_non_fee_modal_btn'),
             onPressed: () {
-              showDialog<void>(
+              showAppDialog<void>(
                 context: context,
                 builder: (_) => AddNonFeeRevenueDialog(
                   language: language,
@@ -1307,7 +1307,7 @@ class NonFeeRevenueView extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       itemCount: revenues.length + 1,
       separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
+      itemBuilder: appEntrance((context, index) {
         if (index == 0) return header;
         final revenue = revenues[index - 1];
         return _OutlinedCard(
@@ -1353,7 +1353,7 @@ class NonFeeRevenueView extends StatelessWidget {
             ),
           ),
         );
-      },
+      }),
     );
   }
 }
@@ -1564,7 +1564,7 @@ class _AddExpenseDialogState extends State<AddExpenseDialog> {
       ),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(tr('cancel', language))),
-        FilledButton(
+        AppButton.filled(
           key: const Key('submit_expense_btn'),
           style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
           // Nothing can be submitted that the society cannot pay for.
@@ -1702,7 +1702,7 @@ class _AddNonFeeRevenueDialogState extends State<AddNonFeeRevenueDialog> {
       ),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(tr('cancel', language))),
-        FilledButton(
+        AppButton.filled(
           key: const Key('submit_non_fee_btn'),
           style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
           onPressed: () {

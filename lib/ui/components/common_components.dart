@@ -32,6 +32,7 @@
 // ignore_for_file: constant_identifier_names
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../data/models.dart';
 import '../../l10n/app_strings.dart';
@@ -39,6 +40,11 @@ import '../../util/format.dart';
 import '../../util/image_blob.dart';
 import '../../util/receipt_pdf.dart';
 import '../theme/app_colors.dart';
+import 'app_loading.dart';
+import 'app_motion.dart';
+
+export 'app_loading.dart';
+export 'app_motion.dart';
 
 /// Top bar for every signed-in screen.
 ///
@@ -79,105 +85,130 @@ class SocietyTopAppBar extends StatelessWidget implements PreferredSizeWidget {
       semanticLabel: AppStrings.get('switch_language', currentLanguage),
     );
 
-    return Material(
-      color: AppColors.tealPrimary,
-      elevation: 4,
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            children: [
-              Expanded(
-                child: InkWell(
-                  key: const Key('society_logo_btn'),
-                  onTap: onOpenSocietyProfile,
-                  child: Row(
-                    children: [
-                      SocietyLogoMark(logoBase64: societyInfo?.logoBase64, size: 40),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              societyInfo?.name ?? AppStrings.get('app_title', currentLanguage),
-                              style: textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [AppColors.tealDark, AppColors.tealPrimary, Color(0xFF0E8A7B)],
+          ),
+          boxShadow: [BoxShadow(color: Color(0x3300695C), blurRadius: 12, offset: Offset(0, 3))],
+        ),
+        child: Material(
+          type: MaterialType.transparency,
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      key: const Key('society_logo_btn'),
+                      onTap: onOpenSocietyProfile,
+                      borderRadius: BorderRadius.circular(14),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(13),
+                              color: Colors.white.withValues(alpha: 0.35),
                             ),
-                            Text(
-                              user != null
-                                  ? '${user.flatNumber} • ${getRoleLabel(user.role, currentLanguage)}'
-                                  : AppStrings.get('app_tagline', currentLanguage),
-                              style: textTheme.bodySmall?.copyWith(
-                                color: Colors.white.withValues(alpha: 0.85),
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            child: SocietyLogoMark(logoBase64: societyInfo?.logoBase64, size: 40),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  societyInfo?.name ?? AppStrings.get('app_title', currentLanguage),
+                                  style: textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  user != null
+                                      ? '${user.flatNumber} • ${getRoleLabel(user.role, currentLanguage)}'
+                                      : AppStrings.get('app_tagline', currentLanguage),
+                                  style: textTheme.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.85)),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-              // Language switcher - icon only, no label.
-              if (onSelectLanguage != null)
-                PopupMenuButton<AppLanguage>(
-                  key: const Key('language_toggle_btn'),
-                  icon: languageIcon,
-                  tooltip: AppStrings.get('switch_language', currentLanguage),
-                  onSelected: onSelectLanguage,
-                  itemBuilder: (_) => [
-                    for (final lang in AppLanguage.values)
-                      PopupMenuItem<AppLanguage>(
-                        value: lang,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '${lang.displayName} (${lang.nativeName})',
-                              style: TextStyle(
-                                fontWeight: lang == currentLanguage ? FontWeight.bold : FontWeight.normal,
-                              ),
+                  // Language switcher - icon only, no label.
+                  if (onSelectLanguage != null)
+                    PopupMenuButton<AppLanguage>(
+                      key: const Key('language_toggle_btn'),
+                      icon: languageIcon,
+                      tooltip: AppStrings.get('switch_language', currentLanguage),
+                      onSelected: onSelectLanguage,
+                      itemBuilder: (_) => [
+                        for (final lang in AppLanguage.values)
+                          PopupMenuItem<AppLanguage>(
+                            value: lang,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  '${lang.displayName} (${lang.nativeName})',
+                                  style: TextStyle(
+                                    fontWeight: lang == currentLanguage ? FontWeight.bold : FontWeight.normal,
+                                  ),
+                                ),
+                                if (lang == currentLanguage) ...[
+                                  const SizedBox(width: 8),
+                                  const Icon(Icons.check, color: AppColors.tealPrimary, size: 16),
+                                ],
+                              ],
                             ),
-                            if (lang == currentLanguage) ...[
-                              const SizedBox(width: 8),
-                              const Icon(Icons.check, color: AppColors.tealPrimary, size: 16),
-                            ],
-                          ],
-                        ),
+                          ),
+                      ],
+                    )
+                  else
+                    SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: IconButton(
+                        key: const Key('language_toggle_btn'),
+                        padding: EdgeInsets.zero,
+                        onPressed: onToggleLanguage,
+                        icon: languageIcon,
                       ),
+                    ),
+                  if (user != null) ...[
+                    const SizedBox(width: 4),
+                    Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.7), width: 1.5),
+                      ),
+                      child: MemberAvatar(
+                        key: const Key('user_profile_btn'),
+                        photoBase64: user.photoBase64,
+                        name: user.ownerName,
+                        size: 36,
+                        onTap: onOpenUserProfile,
+                      ),
+                    ),
                   ],
-                )
-              else
-                SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: IconButton(
-                    key: const Key('language_toggle_btn'),
-                    padding: EdgeInsets.zero,
-                    onPressed: onToggleLanguage,
-                    icon: languageIcon,
-                  ),
-                ),
-              if (user != null) ...[
-                const SizedBox(width: 4),
-                MemberAvatar(
-                  key: const Key('user_profile_btn'),
-                  photoBase64: user.photoBase64,
-                  name: user.ownerName,
-                  size: 38,
-                  onTap: onOpenUserProfile,
-                ),
-              ],
-            ],
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -222,13 +253,7 @@ class SocietyLogoMark extends StatelessWidget {
 
 /// Member photo, or their initial when no photo has been uploaded.
 class MemberAvatar extends StatelessWidget {
-  const MemberAvatar({
-    super.key,
-    required this.photoBase64,
-    required this.name,
-    required this.size,
-    this.onTap,
-  });
+  const MemberAvatar({super.key, required this.photoBase64, required this.name, required this.size, this.onTap});
 
   final String? photoBase64;
   final String name;
@@ -252,10 +277,7 @@ class MemberAvatar extends StatelessWidget {
           fit: BoxFit.cover,
           placeholder: Text(
             initial,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white),
           ),
         ),
       ),
@@ -312,54 +334,72 @@ class FinancialKpiCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final textTheme = theme.textTheme;
-    return Card(
-      margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: AppColors.borderLight),
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.borderLight),
+        boxShadow: const [BoxShadow(color: Color(0x0F0F172A), blurRadius: 16, offset: Offset(0, 6))],
       ),
-      color: theme.colorScheme.surface,
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: accentColor.withValues(alpha: 0.12),
-              ),
-              alignment: Alignment.center,
-              child: Icon(icon, color: accentColor, size: 20),
+      child: Stack(
+        children: [
+          // A soft tinted bubble in the corner gives each KPI its own colour.
+          Positioned(
+            right: -22,
+            top: -22,
+            child: Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: accentColor.withValues(alpha: 0.07)),
             ),
-            const SizedBox(height: 10),
-            Text(
-              title,
-              style: textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+          ),
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [accentColor.withValues(alpha: 0.18), accentColor.withValues(alpha: 0.08)],
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(icon, color: accentColor, size: 20),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  title,
+                  style: textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                AnimatedAmount(
+                  amount: amount,
+                  format: rupees,
+                  style: textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                  maxLines: 1,
+                ),
+                if (subtitle != null)
+                  Text(
+                    subtitle!,
+                    style: textTheme.labelSmall?.copyWith(color: accentColor, fontWeight: FontWeight.w600),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
             ),
-            Text(
-              rupees(amount),
-              style: textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: theme.colorScheme.onSurface,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            if (subtitle != null)
-              Text(
-                subtitle!,
-                style: textTheme.labelSmall?.copyWith(color: accentColor),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -401,10 +441,7 @@ class SectionHeader extends StatelessWidget {
                   ),
                 ),
                 if (subtitle != null)
-                  Text(
-                    subtitle!,
-                    style: textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                  ),
+                  Text(subtitle!, style: textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
               ],
             ),
           ),
@@ -414,10 +451,7 @@ class SectionHeader extends StatelessWidget {
               onPressed: onActionClick,
               child: Text(
                 actionLabel!,
-                style: textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.tealPrimary,
-                ),
+                style: textTheme.labelMedium?.copyWith(fontWeight: FontWeight.bold, color: AppColors.tealPrimary),
               ),
             ),
         ],
@@ -437,14 +471,15 @@ class _Badge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(12)),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: foreground.withValues(alpha: 0.18)),
+      ),
       child: Text(
         label,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: foreground,
-            ),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.bold, color: foreground),
       ),
     );
   }
@@ -478,10 +513,10 @@ class VisitorStatusBadge extends StatelessWidget {
     final (bg, fg, key) = switch (status) {
       VisitorStatus.INSIDE => (AppColors.statusPaidBg, AppColors.statusPaid, 'visitor_inside'),
       VisitorStatus.EXITED => (
-          AppColors.surfaceVariant,
-          Theme.of(context).colorScheme.onSurfaceVariant,
-          'visitor_exited',
-        ),
+        AppColors.surfaceVariant,
+        Theme.of(context).colorScheme.onSurfaceVariant,
+        'visitor_exited',
+      ),
       VisitorStatus.PRE_APPROVED => (AppColors.statusPendingBg, AppColors.statusPending, 'generate_passcode'),
       // A turned-away visitor is a gate outcome, not a payment one. This
       // used to borrow the billing string and read as "Unpaid".
@@ -524,7 +559,7 @@ Future<void> showReceiptDialog(
   required SocietyInfo? society,
   required AppLanguage language,
 }) {
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     builder: (dialogContext) => ReceiptDialog(
       bill: bill,
@@ -581,19 +616,19 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
     final buttonShape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(10));
 
     Widget buttonLabel(IconData icon, String text, Color color) => Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 18, color: color),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                text,
-                style: textTheme.labelMedium?.copyWith(color: color),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        );
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 18, color: color),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            text,
+            style: textTheme.labelMedium?.copyWith(color: color),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
 
     return AlertDialog(
       insetPadding: dialogInsetPadding(context),
@@ -641,19 +676,13 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
                                   color: AppColors.tealPrimary,
                                 ),
                               ),
-                              Text(
-                                'Reg No: ${reg.trim().isEmpty ? '-' : reg}',
-                                style: textTheme.bodySmall,
-                              ),
+                              Text('Reg No: ${reg.trim().isEmpty ? '-' : reg}', style: textTheme.bodySmall),
                             ],
                           ),
                         ),
                       ],
                     ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 4),
-                      child: Divider(height: 1),
-                    ),
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Divider(height: 1)),
                     ReceiptRow(label: 'Unit / Member', value: '${bill.flatNumber} - ${bill.residentName}'),
                     ReceiptRow(label: 'Month', value: bill.billMonth),
                     ReceiptRow(label: 'Bill Amount', value: rupees(bill.chargesSubtotal)),
@@ -717,7 +746,7 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
                   ),
                 ),
                 Expanded(
-                  child: FilledButton(
+                  child: AppButton.filled(
                     key: const Key('receipt_share_btn'),
                     style: FilledButton.styleFrom(
                       backgroundColor: AppColors.tealPrimary,
@@ -737,16 +766,14 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
               const SizedBox(height: 8),
               Text(
                 _status!,
-                style: textTheme.bodySmall?.copyWith(
-                  color: _isError ? theme.colorScheme.error : AppColors.statusPaid,
-                ),
+                style: textTheme.bodySmall?.copyWith(color: _isError ? theme.colorScheme.error : AppColors.statusPaid),
               ),
             ],
           ],
         ),
       ),
       actions: [
-        FilledButton(
+        AppButton.filled(
           style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
           onPressed: widget.onDismiss,
           child: Text(AppStrings.get('close', language)),
@@ -889,7 +916,6 @@ class _SearchableDropdownFieldState extends State<SearchableDropdownField> {
       helperText: widget.allowFreeText && widget.options.isEmpty
           ? 'Type it in - no list available for this selection.'
           : null,
-      inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder()),
       onSelected: (picked) {
         if (picked != null) widget.onValueChange(picked);
       },
@@ -929,9 +955,7 @@ class MonthYearPickerField extends StatelessWidget {
     final parts = value.trim().split(' ').where((p) => p.trim().isNotEmpty).toList();
     final month = parts.isNotEmpty ? parts[0] : '';
     final year = parts.length > 1 ? parts[1] : '';
-    final years = [
-      for (var y = currentYear + yearsForward; y >= currentYear - yearsBack; y--) y.toString(),
-    ];
+    final years = [for (var y = currentYear + yearsForward; y >= currentYear - yearsBack; y--) y.toString()];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -966,8 +990,7 @@ class MonthYearPickerField extends StatelessWidget {
                 label: 'Year',
                 value: year,
                 options: years,
-                onValueChange: (picked) =>
-                    onValueChange('${month.trim().isEmpty ? MONTH_NAMES.first : month} $picked'),
+                onValueChange: (picked) => onValueChange('${month.trim().isEmpty ? MONTH_NAMES.first : month} $picked'),
                 allowFreeText: false,
                 testTag: '${testTagPrefix}_year_dropdown',
               ),
@@ -989,6 +1012,16 @@ class MonthYearPickerField extends StatelessWidget {
 
 /// English month names, the same spelling every bill month is stored with.
 const List<String> MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
 ];

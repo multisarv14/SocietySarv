@@ -25,7 +25,7 @@ class _ResidentPortalScreenState extends State<ResidentPortalScreen> {
   String _selectedYear = '';
 
   void _openPasscodeGenerator(SocietyViewModel vm, String myFlat, AppLanguage language) {
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (dialogContext) => GenerateVisitorPasscodeDialog(
         flatNumber: myFlat,
@@ -43,7 +43,7 @@ class _ResidentPortalScreenState extends State<ResidentPortalScreen> {
 
   void _showGeneratedPasscode(String code, AppLanguage language) {
     final theme = Theme.of(context);
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         insetPadding: dialogInsetPadding(dialogContext),
@@ -84,7 +84,7 @@ class _ResidentPortalScreenState extends State<ResidentPortalScreen> {
           ),
         ),
         actions: [
-          FilledButton(
+          AppButton.filled(
             style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: Text(tr('close', language)),
@@ -95,7 +95,7 @@ class _ResidentPortalScreenState extends State<ResidentPortalScreen> {
   }
 
   void _openChangePin(SocietyViewModel vm, AppLanguage language) {
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (dialogContext) => ChangePinDialog(
         language: language,
@@ -273,7 +273,7 @@ class _ResidentPortalScreenState extends State<ResidentPortalScreen> {
       // nowhere else to be.
       SizedBox(
         height: 48,
-        child: FilledButton(
+        child: AppButton.filled(
           key: const Key('gen_passcode_btn'),
           style: FilledButton.styleFrom(
             backgroundColor: AppColors.tealPrimary,
@@ -362,7 +362,7 @@ class _ResidentPortalScreenState extends State<ResidentPortalScreen> {
         padding: const EdgeInsets.all(16),
         itemCount: children.length,
         separatorBuilder: (_, _) => const SizedBox(height: 14),
-        itemBuilder: (_, i) => children[i],
+        itemBuilder: (_, i) => AppEntrance(index: i, child: children[i]),
       ),
     );
   }
@@ -573,7 +573,7 @@ class _ResidentPortalScreenState extends State<ResidentPortalScreen> {
               Row(
                 children: [
                   Expanded(
-                    child: FilledButton(
+                    child: AppButton.filled(
                       key: Key('portal_approve_visitor_${visitor.id}'),
                       style: FilledButton.styleFrom(
                         backgroundColor: AppColors.tealPrimary,
@@ -1026,7 +1026,7 @@ class _GenerateVisitorPasscodeDialogState extends State<GenerateVisitorPasscodeD
       ),
       actions: [
         TextButton(onPressed: widget.onDismiss, child: Text(tr('cancel', widget.language))),
-        FilledButton(
+        AppButton.filled(
           style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
           onPressed: () {
             if (_name.text.trim().isNotEmpty) {
@@ -1108,7 +1108,7 @@ class _ChangePinDialogState extends State<ChangePinDialog> {
       ),
       actions: [
         TextButton(onPressed: widget.onDismiss, child: Text(tr('cancel', widget.language))),
-        FilledButton(
+        AppButton.filled(
           style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
           onPressed: () {
             final newPin = _newPin.text;

@@ -17,6 +17,7 @@
 //     StateTextField (a value/onChanged outlined text field, the Compose OutlinedTextField shape).
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -118,7 +119,6 @@ class _StateTextFieldState extends State<StateTextField> {
         });
       },
       decoration: InputDecoration(
-        border: const OutlineInputBorder(),
         labelText: widget.label,
         hintText: widget.placeholder,
         helperText: showErrorText ? null : widget.supportingText,
@@ -161,7 +161,7 @@ class _AuthScreenState extends State<AuthScreen> {
     // the login details can actually be handed over (5. Confirmation).
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      await showDialog<void>(
+      await showAppDialog<void>(
         context: context,
         builder: (dialogContext) => RegistrationSuccessDialog(
           society: pending.society,
@@ -185,11 +185,15 @@ class _AuthScreenState extends State<AuthScreen> {
     _maybeShowSuccess(vm);
 
     return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       resizeToAvoidBottomInset: true,
       body: SafeArea(
-        child: _isWizardOpen
+        top: _isWizardOpen,
+        child: SharedAxisSwitcher(
+          forward: _isWizardOpen,
+          child: _isWizardOpen
             ? SocietyRegistrationWizard(
+                key: const ValueKey('wizard'),
                 language: language,
                 onDismiss: () => setState(() => _isWizardOpen = false),
                 onFinish: (request, onError) {
@@ -202,7 +206,11 @@ class _AuthScreenState extends State<AuthScreen> {
                   });
                 },
               )
-            : LoginFormContent(onOpenWizard: () => setState(() => _isWizardOpen = true)),
+            : LoginFormContent(
+                key: const ValueKey('login'),
+                onOpenWizard: () => setState(() => _isWizardOpen = true),
+              ),
+        ),
       ),
     );
   }
@@ -238,35 +246,84 @@ class _LoginFormContentState extends State<LoginFormContent> {
     final tt = theme.textTheme;
     final cs = theme.colorScheme;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    final topInset = MediaQuery.paddingOf(context).top;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Stack(
+      children: [
+        // Brand gradient behind the top of the page; the form card overlaps it.
+        Container(
+          width: double.infinity,
+          height: 300 + topInset,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [AppColors.tealDark, AppColors.tealPrimary, Color(0xFF26A69A)],
+            ),
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(36)),
+          ),
+          child: Stack(
+            children: [
+              Positioned(
+                right: -50,
+                top: -30,
+                child: _Bubble(size: 180, opacity: 0.08),
+              ),
+              Positioned(
+                left: -40,
+                bottom: 20,
+                child: _Bubble(size: 120, opacity: 0.06),
+              ),
+            ],
+          ),
+        ),
+        SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(20, topInset + 12, 20, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const SizedBox(height: 16),
-          SocietyLogoMark(logoBase64: societyInfo?.logoBase64, size: 96),
-          const SizedBox(height: 14),
-          Text(
-            societyInfo?.name ?? tr('app_title', language),
-            style: tt.headlineSmall?.copyWith(fontWeight: FontWeight.bold, color: cs.onSurface),
-            textAlign: TextAlign.center,
+          const SizedBox(height: 20),
+          AppEntrance(
+            index: 0,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 24, offset: Offset(0, 10))],
+              ),
+              child: SocietyLogoMark(logoBase64: societyInfo?.logoBase64, size: 84),
+            ),
           ),
-          Padding(
-            padding: const EdgeInsets.only(top: 4, bottom: 20),
+          const SizedBox(height: 16),
+          AppEntrance(
+            index: 1,
             child: Text(
-              tr('app_tagline', language),
-              style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+              societyInfo?.name ?? tr('app_title', language),
+              style: tt.headlineSmall?.copyWith(fontWeight: FontWeight.w800, color: Colors.white),
               textAlign: TextAlign.center,
             ),
           ),
-          Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-              side: const BorderSide(color: AppColors.borderLight),
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 24),
+            child: AppEntrance(
+              index: 2,
+              child: Text(
+                tr('app_tagline', language),
+                style: tt.bodyMedium?.copyWith(color: Colors.white.withValues(alpha: 0.85)),
+                textAlign: TextAlign.center,
+              ),
             ),
-            color: cs.surface,
-            elevation: 2,
-            margin: EdgeInsets.zero,
+          ),
+          AppEntrance(
+            index: 3,
+            child: Container(
+            decoration: BoxDecoration(
+              color: cs.surface,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: const [BoxShadow(color: Color(0x1F0F172A), blurRadius: 30, offset: Offset(0, 12))],
+            ),
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
@@ -274,9 +331,9 @@ class _LoginFormContentState extends State<LoginFormContent> {
                 children: [
                   Text(
                     tr('login_button', language),
-                    style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: cs.onSurface),
+                    style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w800, color: cs.onSurface),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 18),
                   StateTextField(
                     key: const Key('login_society_code_input'),
                     value: _societyCode,
@@ -319,10 +376,30 @@ class _LoginFormContentState extends State<LoginFormContent> {
                     obscureText: !_isPinVisible,
                     keyboardType: TextInputType.number,
                   ),
-                  if (_errorMessage != null) ...[
-                    const SizedBox(height: 8),
-                    Text(_errorMessage!, style: tt.bodySmall?.copyWith(color: cs.error)),
-                  ],
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeOutCubic,
+                    child: _errorMessage == null
+                        ? const SizedBox(width: double.infinity)
+                        : Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(top: 10),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: AppColors.dangerContainer,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.error_outline_rounded, color: AppColors.dangerRed, size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(_errorMessage!, style: tt.bodySmall?.copyWith(color: cs.error)),
+                                ),
+                              ],
+                            ),
+                          ),
+                  ),
                   const SizedBox(height: 4),
                   // Remember Me: keeps the member signed in the next time the app
                   // is opened. Only the society code and the unit / mobile number
@@ -360,12 +437,14 @@ class _LoginFormContentState extends State<LoginFormContent> {
                   ),
                   const SizedBox(height: 6),
                   SizedBox(
-                    height: 48,
-                    child: FilledButton(
+                    height: 52,
+                    child: AppButton.filled(
                       key: const Key('login_submit_btn'),
                       style: FilledButton.styleFrom(
                         backgroundColor: AppColors.tealPrimary,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        elevation: 2,
+                        shadowColor: const Color(0x6600695C),
                       ),
                       onPressed: () {
                         vm.login(_societyCode, _flatOrMobile, _pin, rememberMe: _rememberMe,
@@ -383,16 +462,20 @@ class _LoginFormContentState extends State<LoginFormContent> {
               ),
             ),
           ),
+          ),
           const SizedBox(height: 24),
-          SizedBox(
+          AppEntrance(
+            index: 4,
+            child: SizedBox(
             width: double.infinity,
-            height: 48,
+            height: 52,
             child: OutlinedButton.icon(
               key: const Key('register_society_wizard_btn'),
               onPressed: widget.onOpenWizard,
               style: OutlinedButton.styleFrom(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 side: const BorderSide(color: AppColors.tealPrimary, width: 1.5),
+                backgroundColor: cs.surface,
               ),
               icon: const Icon(Icons.corporate_fare, color: AppColors.tealPrimary),
               label: Text(
@@ -400,6 +483,7 @@ class _LoginFormContentState extends State<LoginFormContent> {
                 style: tt.labelLarge?.copyWith(fontWeight: FontWeight.bold, color: AppColors.tealPrimary),
               ),
             ),
+          ),
           ),
           const SizedBox(height: 12),
           SizedBox(
@@ -414,8 +498,25 @@ class _LoginFormContentState extends State<LoginFormContent> {
           const SizedBox(height: 24),
         ],
       ),
+        ),
+      ],
+      ),
     );
   }
+}
+
+class _Bubble extends StatelessWidget {
+  const _Bubble({required this.size, required this.opacity});
+
+  final double size;
+  final double opacity;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: opacity)),
+      );
 }
 
 class PinVisibilityToggle extends StatelessWidget {
@@ -439,7 +540,7 @@ class PinVisibilityToggle extends StatelessWidget {
 // ------------------------------------------------------------- forgot my PIN
 
 Future<void> showForgotPinDialog(BuildContext context, {required String prefilledSocietyCode}) async {
-  await showDialog<void>(
+  await showAppDialog<void>(
     context: context,
     builder: (_) => ForgotPinDialog(prefilledSocietyCode: prefilledSocietyCode),
   );
@@ -727,7 +828,7 @@ class _ForgotPinDialogState extends State<ForgotPinDialog> {
       ),
       actions: [
         OutlinedButton(onPressed: _close, child: Text(tr('cancel', language))),
-        FilledButton(
+        AppButton.filled(
           key: const Key('forgot_pin_primary_btn'),
           style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
           onPressed: _isBusy ? null : () => _onPrimary(vm),
@@ -771,6 +872,8 @@ class SocietyRegistrationWizard extends StatefulWidget {
 
 class _SocietyRegistrationWizardState extends State<SocietyRegistrationWizard> {
   int _step = 1;
+  // Which way the last step change went, so the step slides in from that side.
+  bool _forward = true;
   String? _errorMessage;
 
   // 1. Society Details
@@ -979,7 +1082,10 @@ class _SocietyRegistrationWizardState extends State<SocietyRegistrationWizard> {
                 tooltip: 'Back',
                 onPressed: () {
                   if (_step > 1) {
-                    setState(() => _step--);
+                    setState(() {
+                      _forward = false;
+                      _step--;
+                    });
                   } else {
                     widget.onDismiss();
                   }
@@ -989,23 +1095,33 @@ class _SocietyRegistrationWizardState extends State<SocietyRegistrationWizard> {
               Expanded(
                 child: Text(
                   tr('register_new_society', language),
-                  style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                  style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w800),
                 ),
               ),
-              Text(
-                '$_step / $_totalSteps',
-                style: tt.labelMedium?.copyWith(fontWeight: FontWeight.bold, color: AppColors.tealPrimary),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppColors.tealContainer,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '$_step / $_totalSteps',
+                  style: tt.labelMedium?.copyWith(fontWeight: FontWeight.bold, color: AppColors.tealPrimary),
+                ),
               ),
             ],
           ),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            child: LinearProgressIndicator(value: _step / _totalSteps, color: AppColors.tealPrimary),
+            child: AnimatedProgressBar(value: _step / _totalSteps, color: AppColors.tealPrimary, height: 6),
           ),
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(vertical: 8),
-              child: KeyedSubtree(key: ValueKey('wizard_step_$_step'), child: stepBody),
+              child: SharedAxisSwitcher(
+                forward: _forward,
+                child: KeyedSubtree(key: ValueKey('wizard_step_$_step'), child: stepBody),
+              ),
             ),
           ),
           if (blocker != null)
@@ -1027,7 +1143,7 @@ class _SocietyRegistrationWizardState extends State<SocietyRegistrationWizard> {
                   onPressed: widget.onDismiss,
                   child: Text(tr('cancel', language)),
                 ),
-                FilledButton(
+                AppButton.filled(
                   key: const Key('wizard_next_btn'),
                   style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
                   onPressed: stepError != null
@@ -1035,7 +1151,10 @@ class _SocietyRegistrationWizardState extends State<SocietyRegistrationWizard> {
                       : () {
                           setState(() => _errorMessage = null);
                           if (_step < _totalSteps) {
-                            setState(() => _step++);
+                            setState(() {
+                              _forward = true;
+                              _step++;
+                            });
                           } else {
                             widget.onFinish(
                               SocietyRegistrationRequest(
@@ -1714,7 +1833,7 @@ class _WingRowState extends State<_WingRow> {
     final unitCount = widget.unitCount;
     final onDelete = widget.onDelete;
     if (onDelete == null) return;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (dialogContext) {
         final tt = Theme.of(dialogContext).textTheme;
@@ -1732,7 +1851,7 @@ class _WingRowState extends State<_WingRow> {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Cancel')),
-            FilledButton(
+            AppButton.filled(
               key: Key('confirm_delete_wing_$wing'),
               style: FilledButton.styleFrom(backgroundColor: cs.error),
               onPressed: () => Navigator.of(dialogContext).pop(true),
@@ -1966,7 +2085,7 @@ class _FloorInventoryStepState extends State<FloorInventoryStep> {
           ),
         ],
         const SizedBox(height: 10),
-        FilledButton(
+        AppButton.filled(
           key: const Key('wizard_save_wing_btn'),
           style: FilledButton.styleFrom(
             backgroundColor: AppColors.tealPrimary,
@@ -2156,7 +2275,7 @@ class _WingUnitCountsEditorState extends State<WingUnitCountsEditor> {
               ),
             ),
             const SizedBox(width: 8),
-            FilledButton(
+            AppButton.filled(
               key: const Key('wizard_add_unit_type_btn'),
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.tealPrimary,
@@ -2533,7 +2652,7 @@ class _RegistrationSuccessDialogState extends State<RegistrationSuccessDialog> {
         ),
       ),
       actions: [
-        FilledButton(
+        AppButton.filled(
           key: const Key('registration_continue_btn'),
           style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
           onPressed: widget.onContinue,

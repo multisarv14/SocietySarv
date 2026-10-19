@@ -49,7 +49,7 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
     };
 
     return Container(
-      color: theme.colorScheme.surface,
+      color: theme.scaffoldBackgroundColor,
       child: Column(
         children: [
           Material(
@@ -61,7 +61,6 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
               padding: const EdgeInsets.symmetric(horizontal: 16),
               labelColor: AppColors.tealPrimary,
               unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
-              indicatorColor: AppColors.tealPrimary,
               tabs: [
                 for (var i = 0; i < subTabs.length; i++)
                   Tab(
@@ -77,7 +76,9 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
               ],
             ),
           ),
-          Expanded(child: body),
+          Expanded(
+            child: FadeThroughSwitcher(child: KeyedSubtree(key: ValueKey('community_$selected'), child: body)),
+          ),
         ],
       ),
     );
@@ -98,7 +99,7 @@ ButtonStyle _filledStyle(Color color, {double radius = 8}) => ElevatedButton.sty
     );
 
 Widget _smallActionButton(BuildContext context, {required Key key, required String label, required VoidCallback onPressed}) {
-  return ElevatedButton.icon(
+  return AppButton.elevatedIcon(
     key: key,
     onPressed: onPressed,
     style: _filledStyle(AppColors.tealPrimary),
@@ -111,7 +112,7 @@ Widget _spacedList(List<Widget> items, double spacing) => ListView.separated(
       padding: const EdgeInsets.all(16),
       itemCount: items.length,
       separatorBuilder: (_, _) => SizedBox(height: spacing),
-      itemBuilder: (_, i) => items[i],
+      itemBuilder: (_, i) => AppEntrance(index: i, child: items[i]),
     );
 
 /// Read-only dropdown for an enum, standing in for Compose's ExposedDropdownMenuBox.
@@ -125,7 +126,7 @@ Widget _enumDropdown<T>({
   return DropdownButtonFormField<T>(
     initialValue: value,
     isExpanded: true,
-    decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+    decoration: InputDecoration(labelText: label),
     items: [for (final v in values) DropdownMenuItem<T>(value: v, child: Text(display(v)))],
     onChanged: (v) {
       if (v != null) onChanged(v);
@@ -162,7 +163,7 @@ class NoticeBoardView extends StatelessWidget {
               context,
               key: const Key('post_notice_btn'),
               label: tr('post_notice', language),
-              onPressed: () => showDialog<void>(
+              onPressed: () => showAppDialog<void>(
                 context: context,
                 builder: (_) => PostNoticeDialog(
                   language: language,
@@ -296,7 +297,7 @@ class _HelpdeskViewState extends State<HelpdeskView> {
 
   void _confirmWithdraw(Complaint complaint, AppLanguage language) {
     final theme = Theme.of(context);
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         insetPadding: dialogInsetPadding(dialogContext),
@@ -310,7 +311,7 @@ class _HelpdeskViewState extends State<HelpdeskView> {
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: Text(tr('cancel', language)),
           ),
-          ElevatedButton(
+          AppButton.elevated(
             key: const Key('confirm_delete_complaint_btn'),
             style: _filledStyle(AppColors.statusOverdue, radius: 20),
             onPressed: () {
@@ -361,7 +362,7 @@ class _HelpdeskViewState extends State<HelpdeskView> {
             context,
             key: const Key('file_complaint_btn'),
             label: tr('file_complaint', language),
-            onPressed: () => showDialog<void>(
+            onPressed: () => showAppDialog<void>(
               context: context,
               builder: (_) => FileComplaintDialog(
                 currentUser: activeUnit ?? currentUser,
@@ -454,7 +455,7 @@ class _HelpdeskViewState extends State<HelpdeskView> {
                 children: [
                   TextButton.icon(
                     key: Key('edit_complaint_btn_${complaint.id}'),
-                    onPressed: () => showDialog<void>(
+                    onPressed: () => showAppDialog<void>(
                       context: context,
                       builder: (_) => EditComplaintDialog(complaint: complaint, language: language),
                     ),
@@ -504,7 +505,7 @@ class EmergencyDirectoryView extends StatelessWidget {
   const EmergencyDirectoryView({super.key});
 
   void _openEditor(BuildContext context, EmergencyContact contact, AppLanguage language) {
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (_) => EmergencyContactDialog(
         contact: contact,
@@ -709,7 +710,6 @@ class _VehicleDirectoryViewState extends State<VehicleDirectoryView> {
         decoration: const InputDecoration(
           labelText: 'Search by plate number, flat or parking slot',
           prefixIcon: Icon(Icons.search),
-          border: OutlineInputBorder(),
         ),
       ),
       for (final resident in filtered)
@@ -814,7 +814,7 @@ class _PostNoticeDialogState extends State<PostNoticeDialog> {
             children: [
               TextField(
                 controller: _title,
-                decoration: const InputDecoration(labelText: 'Notice Title (विषय)', border: OutlineInputBorder()),
+                decoration: const InputDecoration(labelText: 'Notice Title (विषय)'),
               ),
               const SizedBox(height: 10),
               _enumDropdown<NoticeCategory>(
@@ -831,7 +831,6 @@ class _PostNoticeDialogState extends State<PostNoticeDialog> {
                 maxLines: null,
                 decoration: const InputDecoration(
                   labelText: 'Notice Details (सविस्तर माहिती)',
-                  border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 10),
@@ -847,7 +846,7 @@ class _PostNoticeDialogState extends State<PostNoticeDialog> {
       ),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(tr('cancel', language))),
-        ElevatedButton(
+        AppButton.elevated(
           style: _filledStyle(AppColors.tealPrimary, radius: 20),
           onPressed: () {
             if (_title.text.trim().isNotEmpty && _content.text.trim().isNotEmpty) {
@@ -940,7 +939,6 @@ class _EditComplaintDialogState extends State<EditComplaintDialog> {
                 },
                 decoration: const InputDecoration(
                   labelText: 'Complaint Details (तपशील)',
-                  border: OutlineInputBorder(),
                 ),
               ),
               if (_error != null) ...[
@@ -953,7 +951,7 @@ class _EditComplaintDialogState extends State<EditComplaintDialog> {
       ),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(tr('cancel', language))),
-        ElevatedButton(
+        AppButton.elevated(
           key: const Key('save_complaint_btn'),
           style: _filledStyle(AppColors.tealPrimary, radius: 20),
           onPressed: _save,
@@ -1050,7 +1048,7 @@ class _FileComplaintDialogState extends State<FileComplaintDialog> {
                   initialValue: _flat,
                   readOnly: true,
                   enabled: false,
-                  decoration: InputDecoration(labelText: tr('unit_number', language), border: const OutlineInputBorder()),
+                  decoration: InputDecoration(labelText: tr('unit_number', language)),
                 ),
               const SizedBox(height: 10),
               // Re-keyed on the name so it follows the chosen unit.
@@ -1061,7 +1059,7 @@ class _FileComplaintDialogState extends State<FileComplaintDialog> {
                   initialValue: name,
                   readOnly: true,
                   enabled: false,
-                  decoration: const InputDecoration(labelText: 'Resident Name', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(labelText: 'Resident Name'),
                 ),
               ),
               const SizedBox(height: 10),
@@ -1071,7 +1069,6 @@ class _FileComplaintDialogState extends State<FileComplaintDialog> {
                 maxLines: null,
                 decoration: const InputDecoration(
                   labelText: 'Complaint Details (तपशील)',
-                  border: OutlineInputBorder(),
                 ),
               ),
             ],
@@ -1080,7 +1077,7 @@ class _FileComplaintDialogState extends State<FileComplaintDialog> {
       ),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(tr('cancel', language))),
-        ElevatedButton(
+        AppButton.elevated(
           style: _filledStyle(AppColors.tealPrimary, radius: 20),
           onPressed: () {
             if (_desc.text.trim().isNotEmpty) {
@@ -1207,18 +1204,17 @@ class _EmergencyContactDialogState extends State<EmergencyContactDialog> {
                 decoration: const InputDecoration(
                   labelText: 'Title (English)',
                   hintText: 'e.g. Society Plumber',
-                  border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: _titleMr,
-                decoration: const InputDecoration(labelText: 'Title (मराठी)', border: OutlineInputBorder()),
+                decoration: const InputDecoration(labelText: 'Title (मराठी)'),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: _name,
-                decoration: const InputDecoration(labelText: 'Contact Person / Agency', border: OutlineInputBorder()),
+                decoration: const InputDecoration(labelText: 'Contact Person / Agency'),
               ),
               const SizedBox(height: 8),
               TextField(
@@ -1226,7 +1222,7 @@ class _EmergencyContactDialogState extends State<EmergencyContactDialog> {
                 controller: _phone,
                 keyboardType: TextInputType.phone,
                 onChanged: _onPhoneChanged,
-                decoration: InputDecoration(labelText: tr('mobile_number', language), border: const OutlineInputBorder()),
+                decoration: InputDecoration(labelText: tr('mobile_number', language)),
               ),
               const SizedBox(height: 8),
               SearchableDropdownField(
@@ -1283,7 +1279,7 @@ class _EmergencyContactDialogState extends State<EmergencyContactDialog> {
             child: Text(tr('delete', language), style: const TextStyle(color: AppColors.statusOverdue)),
           ),
         TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(tr('cancel', language))),
-        ElevatedButton(
+        AppButton.elevated(
           key: const Key('save_emergency_contact_btn'),
           style: _filledStyle(AppColors.tealPrimary, radius: 20),
           onPressed: canSave ? _save : null,

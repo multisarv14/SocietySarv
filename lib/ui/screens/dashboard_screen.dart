@@ -1,6 +1,7 @@
 // Port of ui/screens/DashboardScreen.kt.
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -17,7 +18,7 @@ class DashboardScreen extends StatelessWidget {
 
   Future<void> _showExportDialog(BuildContext context, SocietyViewModel viewModel, AppLanguage language) {
     final summaryText = viewModel.generateExportSummary();
-    return showDialog<void>(
+    return showAppDialog<void>(
       context: context,
       builder: (dialogContext) {
         final textTheme = Theme.of(dialogContext).textTheme;
@@ -45,7 +46,7 @@ class DashboardScreen extends StatelessWidget {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: Text(tr('close', language))),
-            FilledButton(
+            AppButton.filled(
               key: const Key('confirm_export_btn'),
               style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
               onPressed: () async {
@@ -134,6 +135,19 @@ class DashboardScreen extends StatelessWidget {
     ];
 
     final items = <Widget>[
+      // 0. Greeting hero
+      if (currentUser != null)
+        AnimatedSectionCard(
+          child: _WelcomeHero(
+            greeting: langPick('नमस्कार', 'नमस्ते', _greetingFor(DateTime.now())),
+            name: currentUser.ownerName,
+            detail: '${currentUser.flatNumber} • ${getRoleLabel(currentUser.role, language)}',
+            dateLabel: DateFormat('EEEE, d MMMM', 'en_US').format(DateTime.now()),
+            pendingLabel: langPick('थकबाकी', 'बकाया', 'Outstanding'),
+            pendingAmount: dashboardBills.fold(0.0, (s, b) => s + b.pendingAmount),
+          ),
+        ),
+
       // 1. Pinned Notices Banner (Animated)
       if (pinnedNotices.isNotEmpty)
         AnimatedSectionCard(
@@ -494,36 +508,171 @@ class QuickActionItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return InkWell(
-      key: Key(testTag),
+    return PressableScale(
       onTap: onClick,
-      child: Padding(
-        padding: const EdgeInsets.all(4),
-        child: SizedBox(
-          width: 72,
-          child: Column(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  color: color.withValues(alpha: 0.12),
+      child: InkWell(
+        key: Key(testTag),
+        onTap: onClick,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: SizedBox(
+            width: 72,
+            child: Column(
+              children: [
+                Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [color.withValues(alpha: 0.20), color.withValues(alpha: 0.08)],
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(icon, color: color, size: 22, semanticLabel: label),
                 ),
-                alignment: Alignment.center,
-                child: Icon(icon, color: color, size: 22, semanticLabel: label),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurface),
-                maxLines: 2,
-                textAlign: TextAlign.center,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurface),
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+String _greetingFor(DateTime now) {
+  final h = now.hour;
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+/// Gradient welcome card at the top of the home screen.
+class _WelcomeHero extends StatelessWidget {
+  const _WelcomeHero({
+    required this.greeting,
+    required this.name,
+    required this.detail,
+    required this.dateLabel,
+    required this.pendingLabel,
+    required this.pendingAmount,
+  });
+
+  final String greeting;
+  final String name;
+  final String detail;
+  final String dateLabel;
+  final String pendingLabel;
+  final double pendingAmount;
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final firstName = name.trim().split(RegExp(r'\s+')).first;
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppColors.tealDark, AppColors.tealPrimary, Color(0xFF26A69A)],
+        ),
+        boxShadow: const [BoxShadow(color: Color(0x4000695C), blurRadius: 20, offset: Offset(0, 8))],
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -30,
+            top: -40,
+            child: Container(
+              width: 140,
+              height: 140,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.08)),
+            ),
+          ),
+          Positioned(
+            right: 40,
+            bottom: -50,
+            child: Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.06)),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.wb_sunny_rounded, size: 16, color: Colors.white.withValues(alpha: 0.85)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        dateLabel,
+                        style: tt.labelMedium?.copyWith(color: Colors.white.withValues(alpha: 0.85)),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  firstName.isEmpty ? greeting : '$greeting, $firstName',
+                  style: tt.headlineSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w800),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  detail,
+                  style: tt.bodyMedium?.copyWith(color: Colors.white.withValues(alpha: 0.85)),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 18),
+                      const SizedBox(width: 8),
+                      Text(
+                        '$pendingLabel  ',
+                        style: tt.labelLarge?.copyWith(color: Colors.white.withValues(alpha: 0.9)),
+                      ),
+                      AnimatedAmount(
+                        amount: pendingAmount,
+                        format: rupees0,
+                        style: tt.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w800),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

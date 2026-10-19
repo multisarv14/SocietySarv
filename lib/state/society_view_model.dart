@@ -300,6 +300,23 @@ class SocietyViewModel extends ChangeNotifier {
   List<EmergencyContact> _emergencyContacts = const [];
   List<EmergencyContact> get emergencyContacts => _emergencyContacts;
 
+  // ------------------------------------------------------- UI progress state
+
+  /// Operations started through [_safeLaunch] that have not finished yet.
+  /// Drives button spinners and the progress bar under the top bar.
+  int _pendingOps = 0;
+  bool get isBusy => _pendingOps > 0;
+
+  /// Data streams that have not delivered their first snapshot yet.
+  int _awaitingFirstData = 0;
+
+  /// True from the moment a society is opened until every stream has
+  /// delivered once - the screens show loading skeletons meanwhile.
+  bool _isInitialLoading = false;
+  bool get isInitialLoading => _isInitialLoading;
+  String? _activeCode;
+  Completer<void>? _dataReady;
+
   // ------------------------------------------------------- subscriptions
 
   void _onActiveSocietyChanged(String? code) {
@@ -317,14 +334,53 @@ class SocietyViewModel extends ChangeNotifier {
     _notices = const [];
     _complaints = const [];
     _emergencyContacts = const [];
+    _activeCode = code;
+    _isInitialLoading = code != null;
     _notify();
     if (code == null) return;
+    _subscribeAll(code);
+  }
+
+  /// Pull-to-refresh: listens to the society's collections afresh (keeping
+  /// what is on screen meanwhile) and completes once every one has answered.
+  Future<void> refresh() async {
+    final code = _activeCode;
+    if (code == null) return;
+    for (final s in _dataSubs) {
+      s.cancel();
+    }
+    _dataSubs.clear();
+    _subscribeAll(code);
+    await (_dataReady?.future ?? Future<void>.value()).timeout(const Duration(seconds: 10), onTimeout: () {});
+  }
+
+  void _subscribeAll(String code) {
+    _awaitingFirstData = 0;
+    final ready = Completer<void>();
+    _dataReady = ready;
 
     void sub<T>(Stream<T> stream, void Function(T) onData) {
+      var first = true;
+      _awaitingFirstData++;
+      void arrived() {
+        if (!first) return;
+        first = false;
+        _awaitingFirstData--;
+        if (_awaitingFirstData <= 0) {
+          _isInitialLoading = false;
+          if (!ready.isCompleted) ready.complete();
+        }
+      }
+
       _dataSubs.add(stream.listen((value) {
         onData(value);
+        arrived();
         _notify();
-      }, onError: (Object e) => debugPrint('$_tag: stream error $e')));
+      }, onError: (Object e) {
+        debugPrint('$_tag: stream error $e');
+        arrived();
+        _notify();
+      }));
     }
 
     sub<SocietyInfo?>(_repository.watchSociety(code), (v) => _societyInfo = v);
@@ -355,6 +411,8 @@ class SocietyViewModel extends ChangeNotifier {
   /// Every Firestore call can fail - rejected by the rules, offline, over
   /// quota. Surface it to the user instead of crashing.
   Future<void> _safeLaunch(Future<void> Function() block) async {
+    _pendingOps++;
+    _notify();
     try {
       await block();
     } catch (e, st) {
@@ -364,6 +422,9 @@ class SocietyViewModel extends ChangeNotifier {
         'कार्रवाई विफल। इंटरनेट जांचें और पुनः प्रयास करें।',
         'That did not go through. Check your connection and try again.',
       );
+      _notify();
+    } finally {
+      _pendingOps--;
       _notify();
     }
   }

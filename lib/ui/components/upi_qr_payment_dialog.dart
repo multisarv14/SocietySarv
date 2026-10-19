@@ -33,6 +33,8 @@ import '../../util/format.dart';
 import '../../util/image_blob.dart';
 import '../../util/upi_qr.dart';
 import '../theme/app_colors.dart';
+import 'app_loading.dart';
+import 'app_motion.dart';
 import 'common_components.dart' show dialogInsetPadding;
 
 /// Opens [UpiQrPaymentDialog]. Close dismisses it; "I have Paid" dismisses it
@@ -45,7 +47,7 @@ Future<void> showUpiQrPaymentDialog(
   required VoidCallback onPaymentRecorded,
   UnitDues? dues,
 }) {
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     builder: (dialogContext) => UpiQrPaymentDialog(
       bill: bill,
@@ -407,7 +409,7 @@ class UpiQrPaymentDialog extends StatelessWidget {
           onPressed: onDismiss,
           child: Text(AppStrings.get('close', language)),
         ),
-        FilledButton(
+        AppButton.filled(
           key: const Key('record_after_upi_btn'),
           style: FilledButton.styleFrom(
             backgroundColor: AppColors.tealPrimary,

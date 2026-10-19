@@ -46,7 +46,7 @@ String _orDash(String s) => s.trim().isEmpty ? '-' : s;
 Future<void> showSocietyProfileDialog(BuildContext context, {required VoidCallback onEdit}) async {
   final vm = context.read<SocietyViewModel>();
   if (vm.societyInfo == null) return;
-  await showDialog<void>(
+  await showAppDialog<void>(
     context: context,
     builder: (dialogContext) => SocietyProfileDialog(
       onDismiss: () => Navigator.of(dialogContext).pop(),
@@ -163,7 +163,7 @@ class SocietyProfileDialog extends StatelessWidget {
         ),
       ),
       actions: [
-        FilledButton(
+        AppButton.filled(
           style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
           onPressed: onDismiss,
           child: Text(tr('close', language)),
@@ -523,24 +523,33 @@ class _SocietyRegistrationEditorState extends State<_SocietyRegistrationEditor> 
                     Expanded(
                       child: Text(
                         tr('society_profile', language),
-                        style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                        style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w800),
                       ),
                     ),
-                    Text(
-                      '$_step / $_editorSteps',
-                      style: tt.labelMedium?.copyWith(fontWeight: FontWeight.bold, color: AppColors.tealPrimary),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: AppColors.tealContainer,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '$_step / $_editorSteps',
+                        style: tt.labelMedium?.copyWith(fontWeight: FontWeight.bold, color: AppColors.tealPrimary),
+                      ),
                     ),
                   ],
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: LinearProgressIndicator(value: _step / _editorSteps, color: AppColors.tealPrimary),
+                  child: AnimatedProgressBar(value: _step / _editorSteps, color: AppColors.tealPrimary, height: 6),
                 ),
                 Expanded(
-                  child: SingleChildScrollView(
-                    key: Key('society_editor_step_$_step'),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: stepBody,
+                  child: FadeThroughSwitcher(
+                    child: SingleChildScrollView(
+                      key: Key('society_editor_step_$_step'),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: stepBody,
+                    ),
                   ),
                 ),
                 if (blocker != null)
@@ -562,7 +571,7 @@ class _SocietyRegistrationEditorState extends State<_SocietyRegistrationEditor> 
                         onPressed: widget.onCancel,
                         child: Text(tr('cancel', language)),
                       ),
-                      FilledButton(
+                      AppButton.filled(
                         key: const Key('save_society_profile_btn'),
                         style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
                         onPressed: stepError != null
@@ -772,7 +781,7 @@ Future<void> showUserProfileDialog(BuildContext context) async {
   final vm = context.read<SocietyViewModel>();
   if (vm.currentUser == null) return;
   var logout = false;
-  await showDialog<void>(
+  await showAppDialog<void>(
     context: context,
     builder: (dialogContext) => UserProfileDialog(
       onDismiss: () => Navigator.of(dialogContext).pop(),
@@ -1054,7 +1063,7 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
                 }),
                 child: Text(tr('cancel', language)),
               ),
-              FilledButton(
+              AppButton.filled(
                 key: const Key('save_user_profile_btn'),
                 style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
                 onPressed: () => _save(vm),
@@ -1062,7 +1071,7 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
               ),
             ]
           : [
-              FilledButton(
+              AppButton.filled(
                 style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
                 onPressed: widget.onDismiss,
                 child: Text(tr('close', language)),

@@ -63,8 +63,7 @@ class _ResidentsScreenState extends State<ResidentsScreen> with SingleTickerProv
               tabAlignment: TabAlignment.start,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               labelColor: AppColors.tealPrimary,
-              unselectedLabelColor: AppColors.tealPrimary,
-              indicatorColor: AppColors.tealPrimary,
+              unselectedLabelColor: AppColors.textSecondary,
               tabs: [
                 for (var i = 0; i < subTabs.length; i++)
                   Tab(
@@ -74,7 +73,6 @@ class _ResidentsScreenState extends State<ResidentsScreen> with SingleTickerProv
                       maxLines: 1,
                       style: theme.textTheme.labelLarge?.copyWith(
                         fontWeight: selected == i ? FontWeight.bold : FontWeight.w500,
-                        color: AppColors.tealPrimary,
                       ),
                     ),
                   ),
@@ -82,11 +80,16 @@ class _ResidentsScreenState extends State<ResidentsScreen> with SingleTickerProv
             ),
           ),
           Expanded(
-            child: switch (selected) {
-              0 => const _MembersTab(),
-              1 => const _ParkingTab(),
-              _ => const _SocietyStaffTab(),
-            },
+            child: FadeThroughSwitcher(
+              child: KeyedSubtree(
+                key: ValueKey('residents_$selected'),
+                child: switch (selected) {
+                  0 => const _MembersTab(),
+                  1 => const _ParkingTab(),
+                  _ => const _SocietyStaffTab(),
+                },
+              ),
+            ),
           ),
         ],
       ),
@@ -126,7 +129,7 @@ class _MembersTabState extends State<_MembersTab> {
             'details and their login are removed.'
             '${member.balanceDue > 0 ? '\n\nThey still owe ${rupees(member.balanceDue)}.' : ''}';
 
-    return showDialog<void>(
+    return showAppDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         insetPadding: dialogInsetPadding(dialogContext),
@@ -137,7 +140,7 @@ class _MembersTabState extends State<_MembersTab> {
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: Text(tr('cancel', language)),
           ),
-          FilledButton(
+          AppButton.filled(
             key: const Key('confirm_delete_member_btn'),
             style: FilledButton.styleFrom(backgroundColor: AppColors.statusOverdue),
             onPressed: () {
@@ -157,7 +160,7 @@ class _MembersTabState extends State<_MembersTab> {
   }
 
   void _openResidentDialog(BuildContext context, Resident? existing) {
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (_) => AddResidentDialog(existing: existing),
     );
@@ -202,7 +205,7 @@ class _MembersTabState extends State<_MembersTab> {
               ],
             ),
           ),
-          FilledButton(
+          AppButton.filled(
             key: const Key('add_resident_btn'),
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.tealPrimary,
@@ -237,7 +240,7 @@ class _MembersTabState extends State<_MembersTab> {
       padding: const EdgeInsets.all(16),
       itemCount: children.length,
       separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (_, i) => children[i],
+      itemBuilder: (_, i) => AppEntrance(index: i, child: children[i]),
     );
   }
 
@@ -697,7 +700,7 @@ class _AddResidentDialogState extends State<AddResidentDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: Text(tr('cancel', language)),
         ),
-        FilledButton(
+        AppButton.filled(
           key: const Key('resident_submit_btn'),
           style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
           onPressed: () => _submit(vm, members),
@@ -763,9 +766,9 @@ class _ParkingTab extends StatelessWidget {
         ],
       ),
       if (allBays.isEmpty)
-        Text(
-          'No parking bays configured yet. Set the covered / open counts in the Society Profile.',
-          style: theme.textTheme.bodySmall?.copyWith(color: muted),
+        const EmptyState(
+          icon: Icons.local_parking_rounded,
+          message: 'No parking bays configured yet. Set the covered / open counts in the Society Profile.',
         ),
       for (final (bay, type) in allBays) _bayRow(theme, bay, type, allottedBy[bay.toUpperCase()], language),
     ];
@@ -774,7 +777,7 @@ class _ParkingTab extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       itemCount: children.length,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
-      itemBuilder: (_, i) => children[i],
+      itemBuilder: (_, i) => AppEntrance(index: i, child: children[i]),
     );
   }
 
@@ -831,7 +834,7 @@ class _SocietyStaffTab extends StatelessWidget {
   const _SocietyStaffTab();
 
   void _openStaffDialog(BuildContext context, Resident? existing) {
-    showDialog<void>(context: context, builder: (_) => StaffDialog(existing: existing));
+    showAppDialog<void>(context: context, builder: (_) => StaffDialog(existing: existing));
   }
 
   @override
@@ -860,7 +863,7 @@ class _SocietyStaffTab extends StatelessWidget {
               ],
             ),
           ),
-          FilledButton(
+          AppButton.filled(
             key: const Key('add_staff_btn'),
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.tealPrimary,
@@ -937,7 +940,7 @@ class _SocietyStaffTab extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       itemCount: children.length,
       separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (_, i) => children[i],
+      itemBuilder: (_, i) => AppEntrance(index: i, child: children[i]),
     );
   }
 }
@@ -1130,7 +1133,7 @@ class _StaffDialogState extends State<StaffDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: Text(tr('cancel', language)),
         ),
-        FilledButton(
+        AppButton.filled(
           key: const Key('staff_submit_btn'),
           style: FilledButton.styleFrom(backgroundColor: AppColors.tealPrimary),
           onPressed: () {

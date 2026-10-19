@@ -40,7 +40,7 @@ class _GateSecurityScreenState extends State<GateSecurityScreen> with SingleTick
     final selected = _tabs.index;
 
     return Container(
-      color: theme.colorScheme.surface,
+      color: theme.scaffoldBackgroundColor,
       child: Column(
         children: [
           Material(
@@ -52,7 +52,6 @@ class _GateSecurityScreenState extends State<GateSecurityScreen> with SingleTick
               padding: const EdgeInsets.symmetric(horizontal: 16),
               labelColor: AppColors.tealPrimary,
               unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
-              indicatorColor: AppColors.tealPrimary,
               tabs: [
                 for (var i = 0; i < subTabs.length; i++)
                   Tab(
@@ -69,7 +68,11 @@ class _GateSecurityScreenState extends State<GateSecurityScreen> with SingleTick
             ),
           ),
           Expanded(
-            child: selected == 0 ? const LiveGateTerminalView() : const VisitorHistoryView(),
+            child: FadeThroughSwitcher(
+              child: selected == 0
+                  ? const LiveGateTerminalView(key: ValueKey('gate_live'))
+                  : const VisitorHistoryView(key: ValueKey('gate_history')),
+            ),
           ),
         ],
       ),
@@ -90,7 +93,7 @@ class LiveGateTerminalView extends StatelessWidget {
     final theme = Theme.of(context);
 
     Future<void> openCheckIn() async {
-      await showDialog<void>(
+      await showAppDialog<void>(
         context: context,
         builder: (_) => CheckInVisitorDialog(
           language: language,
@@ -102,7 +105,7 @@ class LiveGateTerminalView extends StatelessWidget {
     }
 
     Future<void> openVerify() async {
-      await showDialog<void>(context: context, builder: (_) => VerifyPasscodeDialog(language: language));
+      await showAppDialog<void>(context: context, builder: (_) => VerifyPasscodeDialog(language: language));
     }
 
     final items = <Widget>[
@@ -112,7 +115,7 @@ class LiveGateTerminalView extends StatelessWidget {
           Expanded(
             child: SizedBox(
               height: 48,
-              child: ElevatedButton.icon(
+              child: AppButton.elevatedIcon(
                 key: const Key('gate_checkin_btn'),
                 onPressed: openCheckIn,
                 style: ElevatedButton.styleFrom(
@@ -129,7 +132,7 @@ class LiveGateTerminalView extends StatelessWidget {
           Expanded(
             child: SizedBox(
               height: 48,
-              child: ElevatedButton.icon(
+              child: AppButton.elevatedIcon(
                 key: const Key('gate_verify_passcode_btn'),
                 onPressed: openVerify,
                 style: ElevatedButton.styleFrom(
@@ -154,30 +157,12 @@ class LiveGateTerminalView extends StatelessWidget {
     ];
 
     if (activeVisitors.isEmpty) {
-      items.add(Card(
-        margin: EdgeInsets.zero,
-        elevation: 0,
-        color: theme.colorScheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: const BorderSide(color: AppColors.borderLight),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            children: [
-              const Icon(Icons.check_circle, color: AppColors.statusPaid, size: 40),
-              const SizedBox(height: 8),
-              Text(
-                language == AppLanguage.marathi
-                    ? 'सध्या आवारात कोणताही बाहेरील अभ्यागत नाही.'
-                    : 'No active external visitors inside premises.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-              ),
-            ],
-          ),
-        ),
+      items.add(EmptyState(
+        icon: Icons.verified_user_rounded,
+        color: AppColors.statusPaid,
+        message: language == AppLanguage.marathi
+            ? 'सध्या आवारात कोणताही बाहेरील अभ्यागत नाही.'
+            : 'No active external visitors inside premises.',
       ));
     } else {
       for (final visitor in activeVisitors) {
@@ -196,7 +181,7 @@ class LiveGateTerminalView extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       itemCount: items.length,
       separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (_, i) => items[i],
+      itemBuilder: (_, i) => AppEntrance(index: i, child: items[i]),
     );
   }
 }
@@ -287,7 +272,7 @@ class _ActiveVisitorCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 6),
                 ],
-                ElevatedButton.icon(
+                AppButton.elevatedIcon(
                   key: Key('mark_exit_btn_${visitor.id}'),
                   onPressed: () => context.read<SocietyViewModel>().markVisitorExit(visitor),
                   style: ElevatedButton.styleFrom(
@@ -336,14 +321,13 @@ class _VisitorHistoryViewState extends State<VisitorHistoryView> {
       padding: const EdgeInsets.all(16),
       itemCount: filtered.length + 1,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
-      itemBuilder: (context, i) {
+      itemBuilder: appEntrance((context, i) {
         if (i == 0) {
           return TextField(
             onChanged: (v) => setState(() => _searchQuery = v),
             decoration: const InputDecoration(
               labelText: 'Search by name, flat or phone',
               prefixIcon: Icon(Icons.search),
-              border: OutlineInputBorder(),
             ),
           );
         }
@@ -378,7 +362,7 @@ class _VisitorHistoryViewState extends State<VisitorHistoryView> {
             ),
           ),
         );
-      },
+      }),
     );
   }
 }
@@ -448,7 +432,6 @@ class _CheckInVisitorDialogState extends State<CheckInVisitorDialog> {
                 controller: _name,
                 decoration: const InputDecoration(
                   labelText: 'Visitor Name (अभ्यागताचे नाव)',
-                  border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 10),
@@ -457,7 +440,6 @@ class _CheckInVisitorDialogState extends State<CheckInVisitorDialog> {
                 keyboardType: TextInputType.phone,
                 decoration: const InputDecoration(
                   labelText: 'Mobile Number (मोबाईल)',
-                  border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 10),
@@ -466,7 +448,6 @@ class _CheckInVisitorDialogState extends State<CheckInVisitorDialog> {
                 decoration: const InputDecoration(
                   labelText: 'Visiting Unit (सदनिका क्र.)',
                   hintText: 'e.g. A-101',
-                  border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 10),
@@ -475,7 +456,6 @@ class _CheckInVisitorDialogState extends State<CheckInVisitorDialog> {
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Purpose (उद्देश)',
-                  border: OutlineInputBorder(),
                 ),
                 items: [
                   for (final pur in VisitorPurpose.values) DropdownMenuItem(value: pur, child: Text(pur.name)),
@@ -490,7 +470,6 @@ class _CheckInVisitorDialogState extends State<CheckInVisitorDialog> {
                 decoration: const InputDecoration(
                   labelText: 'Vehicle Number (वाहनाचा क्र.)',
                   hintText: 'e.g. MH 12 AB 1234',
-                  border: OutlineInputBorder(),
                 ),
               ),
             ],
@@ -502,7 +481,7 @@ class _CheckInVisitorDialogState extends State<CheckInVisitorDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: Text(tr('cancel', language)),
         ),
-        ElevatedButton(
+        AppButton.elevated(
           key: const Key('submit_checkin_btn'),
           style: ElevatedButton.styleFrom(backgroundColor: AppColors.tealPrimary, foregroundColor: Colors.white),
           onPressed: () {
@@ -562,7 +541,7 @@ class _VerifyPasscodeDialogState extends State<VerifyPasscodeDialog> {
               TextField(
                 controller: _codeInput,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: '6-Digit Code', border: OutlineInputBorder()),
+                decoration: const InputDecoration(labelText: '6-Digit Code'),
               ),
               if (_errorMsg != null) ...[
                 const SizedBox(height: 10),
@@ -600,7 +579,7 @@ class _VerifyPasscodeDialogState extends State<VerifyPasscodeDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: Text(tr('close', language)),
         ),
-        ElevatedButton(
+        AppButton.elevated(
           key: const Key('submit_verify_passcode_btn'),
           style: ElevatedButton.styleFrom(backgroundColor: AppColors.tealPrimary, foregroundColor: Colors.white),
           onPressed: () {
