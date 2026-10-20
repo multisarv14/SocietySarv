@@ -41,7 +41,7 @@ android {
             val keystorePath = signingValue("storeFile", "KEYSTORE_PATH", "societysarv-release-key.jks")
             storeFile = rootProject.file("../$keystorePath")
             storePassword = signingValue("storePassword", "STORE_PASSWORD")
-            keyAlias = signingValue("keyAlias", "KEY_ALIAS", "upload")
+            keyAlias = signingValue("keyAlias", "KEY_ALIAS", "societysarv")
             keyPassword = signingValue("keyPassword", "KEY_PASSWORD")
         }
     }

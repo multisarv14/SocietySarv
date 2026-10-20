@@ -35,7 +35,7 @@ variables:
 ```properties
 storeFile=societysarv-release-key.jks
 storePassword=...
-keyAlias=upload
+keyAlias=societysarv
 keyPassword=...
 ```
 

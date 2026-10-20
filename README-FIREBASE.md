@@ -208,9 +208,9 @@ user flow are exactly as they were.
 | Keystore | `societysarv-release-key.jks` (PKCS12, repo root) |
 | Alias / store pass / key pass | `societysarv` |
 | Certificate | `CN=MultiSarv India, OU=SocietySarv, O=MultiSarv India, L=Navi Mumbai, ST=Maharashtra, C=IN` |
-| Valid until | 03 Jan 2054 |
-| SHA-1 | `5F:2F:BC:AB:B0:77:DD:ED:B6:8B:70:00:5D:41:46:55:EE:74:CC:37` |
-| SHA-256 | `FB:53:22:BB:39:86:A1:D4:52:E4:F1:DF:0D:9F:92:F8:E0:B5:F1:AA:67:D4:99:8A:9A:C8:DE:77:DE:FC:F1:50` |
+| Valid until | 06 Mar 2054 |
+| SHA-1 | `78:5A:00:B6:2F:8D:7B:53:BB:63:55:27:66:A3:41:6A:C5:89:C1:AD` |
+| SHA-256 | `0D:0E:25:3C:D7:D7:1F:DC:14:D2:86:DF:A3:B5:C1:45:FB:6F:F1:56:FD:3E:46:2A:9C:A8:BB:49:C3:D3:B7:13` |
 
 Credentials live in `keystore.properties` (git-ignored). `app/build.gradle.kts`
 reads that file first and falls back to the `KEYSTORE_PATH` / `STORE_PASSWORD` /
