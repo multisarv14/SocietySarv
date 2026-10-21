@@ -65,6 +65,19 @@ List<NavDestination> destinationsFor(UserRole role) {
   }
 }
 
+/// What one signed-in member may open. A society staff role decides by its
+/// own screen list; everyone else (or a staff role since deleted) falls back to
+/// their built-in role.
+List<NavDestination> destinationsForMember(Resident member, List<SocietyRole> roles) {
+  final custom = customRoleOf(member, roles);
+  if (custom == null) return destinationsFor(member.role);
+  return [
+    for (final key in normaliseRoleMenus(custom.menus))
+      for (final d in NavDestination.values)
+        if (d.name == key) d,
+  ];
+}
+
 /// The office bearers who run the society, as opposed to living in it.
 const _committeeRoles = {
   UserRole.CHAIRMAN,
@@ -300,6 +313,34 @@ class SocietyViewModel extends ChangeNotifier {
   List<EmergencyContact> _emergencyContacts = const [];
   List<EmergencyContact> get emergencyContacts => _emergencyContacts;
 
+  List<SocietyRole> _roles = const [];
+
+  /// The society's own staff roles.
+  List<SocietyRole> get roles => _roles;
+
+  List<RoleChange> _roleHistory = const [];
+  List<RoleChange> get roleHistory => _roleHistory;
+
+  List<SubscriptionPlan> _plans = const [];
+
+  /// Plans MultiSarv currently offers, in display order.
+  List<SubscriptionPlan> get subscriptionPlans => offeredPlans(_plans);
+
+  SocietySubscription? _subscription;
+  SocietySubscription? get subscription => _subscription;
+  SubscriptionStatus get subscriptionStatus => subscriptionStatusOf(_subscription, DateTime.now());
+
+  List<SubscriptionRequest> _subscriptionRequests = const [];
+  List<SubscriptionRequest> get subscriptionRequests => _subscriptionRequests;
+
+  /// The request still waiting on MultiSarv, if there is one.
+  SubscriptionRequest? get pendingSubscriptionRequest {
+    for (final r in _subscriptionRequests) {
+      if (r.status == SubscriptionRequestStatus.PENDING) return r;
+    }
+    return null;
+  }
+
   // ------------------------------------------------------- UI progress state
 
   /// Operations started through [_safeLaunch] that have not finished yet.
@@ -334,6 +375,11 @@ class SocietyViewModel extends ChangeNotifier {
     _notices = const [];
     _complaints = const [];
     _emergencyContacts = const [];
+    _roles = const [];
+    _roleHistory = const [];
+    _plans = const [];
+    _subscription = null;
+    _subscriptionRequests = const [];
     _activeCode = code;
     _isInitialLoading = code != null;
     _notify();
@@ -384,7 +430,10 @@ class SocietyViewModel extends ChangeNotifier {
     }
 
     sub<SocietyInfo?>(_repository.watchSociety(code), (v) => _societyInfo = v);
-    sub<List<Resident>>(_repository.watchResidents(code), (v) => _residents = v);
+    sub<List<Resident>>(_repository.watchResidents(code), (v) {
+      _residents = v;
+      _syncCurrentUser();
+    });
     sub<List<MaintenanceBill>>(_repository.watchBills(code), (v) => _bills = v);
     sub<List<ExpenseRecord>>(_repository.watchExpenses(code), (v) => _expenses = v);
     sub<List<NonFeeRevenue>>(_repository.watchRevenues(code), (v) => _revenues = v);
@@ -392,6 +441,43 @@ class SocietyViewModel extends ChangeNotifier {
     sub<List<Notice>>(_repository.watchNotices(code), (v) => _notices = v);
     sub<List<Complaint>>(_repository.watchComplaints(code), (v) => _complaints = v);
     sub<List<EmergencyContact>>(_repository.watchEmergencyContacts(code), (v) => _emergencyContacts = v);
+    sub<List<SocietyRole>>(_repository.watchRoles(code), (v) {
+      _roles = v;
+      _syncCurrentUser();
+    });
+    sub<List<RoleChange>>(_repository.watchRoleHistory(code), (v) => _roleHistory = v);
+    sub<List<SubscriptionPlan>>(_repository.watchSubscriptionPlans(), (v) => _plans = v);
+    sub<SocietySubscription?>(_repository.watchSubscription(code), (v) => _subscription = v);
+    sub<List<SubscriptionRequest>>(_repository.watchSubscriptionRequests(code), (v) => _subscriptionRequests = v);
+  }
+
+  /// Keeps the signed-in member in step with their record, so a role changed
+  /// by the Chairman or from MultiSarv Core takes effect at once: the bottom
+  /// bar, the landing screen and every permission check follow it.
+  void _syncCurrentUser() {
+    final user = _currentUser;
+    if (user == null) return;
+    Resident? fresh;
+    for (final r in _residents) {
+      if (r.docId == user.docId) {
+        fresh = r;
+        break;
+      }
+    }
+    if (fresh == null) return;
+    if (fresh.role.isStaff && !fresh.isActive) {
+      logout();
+      showMessage(
+        msg(
+          'हे कर्मचारी खाते बंद केले आहे. अध्यक्षांशी संपर्क साधा.',
+          'यह स्टाफ खाता निष्क्रिय है। अध्यक्ष से संपर्क करें।',
+          'This staff account has been deactivated. Contact your chairman.',
+        ),
+      );
+      return;
+    }
+    _currentUser = fresh;
+    if (!canOpen(_selectedTab)) _selectedTab = _landingTabFor(fresh);
   }
 
   void _notify() {
@@ -515,6 +601,24 @@ class SocietyViewModel extends ChangeNotifier {
 
   /// True when the signed-in member is the one allowed to edit society details.
   bool get canEditSociety => _currentUser?.role == UserRole.CHAIRMAN;
+
+  /// Creating staff roles and changing anyone's role is the Chairman's alone.
+  bool get canManageRoles => _currentUser?.role == UserRole.CHAIRMAN;
+
+  /// The committee (and the manager running the office) can see the plan.
+  bool get canViewSubscription => _committeeRoles.contains(_currentUser?.role);
+
+  /// Only the Chairman asks MultiSarv for a plan on the society's behalf.
+  bool get canRequestSubscription => _currentUser?.role == UserRole.CHAIRMAN;
+
+  /// Screens the signed-in member may open, in bottom-bar order.
+  List<NavDestination> get destinations {
+    final user = _currentUser;
+    return user == null ? const [] : destinationsForMember(user, _roles);
+  }
+
+  /// The role name to show for [member]: their society role if they hold one.
+  SocietyRole? customRoleFor(Resident member) => customRoleOf(member, _roles);
 
   /// Who may record expenses and revenue: the Chairman and the Treasurer.
   bool get canEditAccounts =>
@@ -653,7 +757,7 @@ class SocietyViewModel extends ChangeNotifier {
 
       _selectedUnitNumber = null;
       _currentUser = resident;
-      _selectedTab = _landingTabFor(resident.role);
+      _selectedTab = _landingTabFor(resident);
       _notify();
       onResult(true, msg('यशस्वी प्रवेश!', 'सफल लॉगिन!', 'Login successful!'));
     });
@@ -685,7 +789,7 @@ class SocietyViewModel extends ChangeNotifier {
         }
 
         _currentUser = resident;
-        _selectedTab = _landingTabFor(resident.role);
+        _selectedTab = _landingTabFor(resident);
       });
     } finally {
       _isRestoringSession = false;
@@ -694,9 +798,10 @@ class SocietyViewModel extends ChangeNotifier {
   }
 
   /// Where a role lands after signing in - always its first allowed screen.
-  NavDestination _landingTabFor(UserRole role) {
+  NavDestination _landingTabFor(Resident member) {
+    final role = member.role;
     if (role == UserRole.RESIDENT || role == UserRole.TENANT) return NavDestination.RESIDENT_PORTAL;
-    final list = destinationsFor(role);
+    final list = destinationsForMember(member, _roles);
     return list.isNotEmpty ? list.first : NavDestination.COMMUNITY;
   }
 
@@ -704,7 +809,7 @@ class SocietyViewModel extends ChangeNotifier {
   bool canOpen(NavDestination destination) {
     final role = _currentUser?.role;
     if (role == null) return false;
-    if (destinationsFor(role).contains(destination)) return true;
+    if (destinations.contains(destination)) return true;
     // My Unit is every member's own, and the gate terminal is reachable from
     // the committee's dashboard even though it is not a tab of theirs.
     return destination == NavDestination.RESIDENT_PORTAL ||
@@ -2133,6 +2238,7 @@ class SocietyViewModel extends ChangeNotifier {
     required String pin,
     required bool isActive,
     Resident? existing,
+    SocietyRole? customRole,
     ResultCallback onResult = _noop,
   }) {
     if (!canEditSociety) {
@@ -2161,7 +2267,12 @@ class SocietyViewModel extends ChangeNotifier {
         return;
       }
 
-      await _repository.insertResident(Resident(
+      if (customRole != null && !customRole.isActive && customRole.docId != existing?.customRoleId) {
+        onResult(false, roleRefusalMessage(RoleChangeRefusal.ROLE_UNAVAILABLE));
+        return;
+      }
+      final newRole = customRole?.baseRole ?? role;
+      final saved = Resident(
         docId: existing?.docId ?? '',
         id: existing?.id ?? 0,
         flatNumber: code,
@@ -2169,13 +2280,21 @@ class SocietyViewModel extends ChangeNotifier {
         ownerName: name.trim(),
         contactNumber: phone.trim(),
         email: email.trim(),
-        role: role,
+        role: newRole,
         pin: trimmedPin,
         staffDesignation: designation.trim(),
         isActive: isActive,
         flatType: FlatType.COMMERCIAL_SHOP,
         balanceDue: 0.0,
-      ));
+        customRoleId: customRole?.docId ?? '',
+        customRoleName: customRole?.name.trim() ?? '',
+        photoBase64: existing?.photoBase64 ?? '',
+      );
+      await _repository.insertResident(saved);
+      // A different role for an existing staff member goes on record.
+      if (existing != null && (existing.role != saved.role || existing.customRoleId != saved.customRoleId)) {
+        await _repository.recordRoleChange(_roleChangeEntry(existing, saved.role, customRole));
+      }
       onResult(
           true,
           msg('कर्मचारी $code जतन केला. ते या कोड व पिनने लॉगिन करू शकतात.', 'स्टाफ $code सहेजा गया। वे इस कोड और पिन से लॉगिन कर सकते हैं।',
@@ -2191,6 +2310,207 @@ class SocietyViewModel extends ChangeNotifier {
     _safeLaunch(() async {
       await _repository.deleteResident(member);
       onResult(true, msg('कर्मचारी हटवला!', 'स्टाफ हटाया गया!', 'Staff member removed.'));
+    });
+  }
+
+  // ------------------------------------------------------------- Roles
+
+  String get _actorLabel {
+    final user = _currentUser;
+    if (user == null) return '';
+    return '${user.ownerName.trim()} (${user.flatNumber})';
+  }
+
+  RoleChange _roleChangeEntry(Resident member, UserRole newRole, SocietyRole? customRole) => RoleChange(
+        flatNumber: member.flatNumber,
+        memberName: member.ownerName,
+        fromRole: member.role,
+        toRole: newRole,
+        fromCustomRoleName: member.customRoleName,
+        toCustomRoleName: customRole?.name.trim() ?? '',
+        changedBy: _actorLabel,
+      );
+
+  /// The words for why a role change was refused, in the current language.
+  String roleRefusalMessage(RoleChangeRefusal reason) {
+    switch (reason) {
+      case RoleChangeRefusal.NOT_CHAIRMAN:
+        return msg(
+          'फक्त अध्यक्षच भूमिका बदलू शकतात.',
+          'केवल अध्यक्ष ही भूमिका बदल सकते हैं।',
+          'Only the Chairman can change roles.',
+        );
+      case RoleChangeRefusal.WRONG_KIND:
+        return msg(
+          'सभासद व कर्मचारी यांच्या भूमिका एकमेकांत बदलता येत नाहीत.',
+          'सदस्य और स्टाफ की भूमिकाएं आपस में नहीं बदली जा सकतीं।',
+          'A member cannot be given a staff role, or a staff member a committee role.',
+        );
+      case RoleChangeRefusal.VACANT_UNIT:
+        return msg(
+          'रिकाम्या सदनिकेला पद देता येत नाही.',
+          'खाली इकाई को पद नहीं दिया जा सकता।',
+          'A vacant unit cannot hold a committee post.',
+        );
+      case RoleChangeRefusal.CHAIRMAN_HANDOVER_ONLY:
+        return msg(
+          'अध्यक्षपद फक्त हस्तांतरित करता येते - "अध्यक्षपद सोपवा" वापरा.',
+          'अध्यक्ष पद केवल सौंपा जा सकता है - "अध्यक्ष पद सौंपें" का उपयोग करें।',
+          'The Chairman\'s post can only be handed over - use "Hand over Chairman".',
+        );
+      case RoleChangeRefusal.ROLE_UNAVAILABLE:
+        return msg('ही भूमिका आता उपलब्ध नाही.', 'यह भूमिका अब उपलब्ध नहीं है।', 'That role is no longer available.');
+      case RoleChangeRefusal.UNCHANGED:
+        return msg('ही भूमिका आधीच आहे.', 'यह भूमिका पहले से है।', 'They already hold that role.');
+    }
+  }
+
+  /// Changes one member's or staff member's role on their existing record.
+  void changeMemberRole(Resident member, UserRole newRole, {SocietyRole? customRole, ResultCallback onResult = _noop}) {
+    final refusal = checkRoleChange(actor: _currentUser, target: member, newRole: newRole, customRole: customRole);
+    if (refusal != null) {
+      onResult(false, roleRefusalMessage(refusal));
+      return;
+    }
+    final role = customRole?.baseRole ?? newRole;
+    _safeLaunch(() async {
+      await _repository.changeMemberRole(member, role, customRole, _roleChangeEntry(member, role, customRole));
+      onResult(true, msg('भूमिका बदलली.', 'भूमिका बदली गई।', 'Role updated.'));
+    });
+  }
+
+  /// The Chairman gives the post to [successor] and takes [myNewRole].
+  void handOverChairman(Resident successor, UserRole myNewRole, {ResultCallback onResult = _noop}) {
+    final me = _currentUser;
+    final refusal = checkChairmanHandover(actor: me, target: successor, actorNewRole: myNewRole);
+    if (refusal != null || me == null) {
+      onResult(false, roleRefusalMessage(refusal ?? RoleChangeRefusal.NOT_CHAIRMAN));
+      return;
+    }
+    _safeLaunch(() async {
+      await _repository.handOverChairman(
+        from: me,
+        fromNewRole: myNewRole,
+        to: successor,
+        fromEntry: _roleChangeEntry(me, myNewRole, null),
+        toEntry: _roleChangeEntry(successor, UserRole.CHAIRMAN, null),
+      );
+      onResult(
+        true,
+        msg(
+          'अध्यक्षपद ${successor.ownerName} यांना सोपवले.',
+          'अध्यक्ष पद ${successor.ownerName} को सौंपा गया।',
+          'The Chairman\'s post was handed over to ${successor.ownerName}.',
+        ),
+      );
+    });
+  }
+
+  /// Creates or edits a society staff role.
+  void saveRole(SocietyRole role, {ResultCallback onResult = _noop}) {
+    if (!canManageRoles) {
+      onResult(false, roleRefusalMessage(RoleChangeRefusal.NOT_CHAIRMAN));
+      return;
+    }
+    final name = role.name.trim();
+    if (name.isEmpty) {
+      onResult(false, msg('भूमिकेचे नाव लिहा.', 'भूमिका का नाम लिखें।', 'Enter a name for the role.'));
+      return;
+    }
+    if (!role.baseRole.isStaff) {
+      onResult(false, roleRefusalMessage(RoleChangeRefusal.WRONG_KIND));
+      return;
+    }
+    final clash = _roles.any((r) => r.docId != role.docId && _eqIgnoreCase(r.name.trim(), name));
+    final builtIn = UserRole.values.any((r) => _eqIgnoreCase(r.name.replaceAll('_', ' '), name));
+    if (clash || builtIn) {
+      onResult(
+        false,
+        msg('या नावाची भूमिका आधीच आहे.', 'इस नाम की भूमिका पहले से है।', 'A role with that name already exists.'),
+      );
+      return;
+    }
+    final holders =
+        role.docId.isEmpty ? const <Resident>[] : _residents.where((r) => r.customRoleId == role.docId).toList();
+    _safeLaunch(() async {
+      await _repository.saveRole(
+        role.copyWith(name: name, menus: normaliseRoleMenus(role.menus)),
+        holders: holders,
+      );
+      onResult(true, msg('भूमिका जतन केली.', 'भूमिका सहेजी गई।', 'Role saved.'));
+    });
+  }
+
+  /// Deletes a staff role nobody holds any more.
+  void deleteRole(SocietyRole role, {ResultCallback onResult = _noop}) {
+    if (!canManageRoles) {
+      onResult(false, roleRefusalMessage(RoleChangeRefusal.NOT_CHAIRMAN));
+      return;
+    }
+    final held = _residents.where((r) => r.customRoleId == role.docId).length;
+    if (held > 0) {
+      onResult(
+        false,
+        msg(
+          '$held कर्मचाऱ्यांकडे ही भूमिका आहे. आधी त्यांची भूमिका बदला.',
+          '$held स्टाफ के पास यह भूमिका है। पहले उनकी भूमिका बदलें।',
+          '$held staff member(s) still hold this role. Change their role first.',
+        ),
+      );
+      return;
+    }
+    _safeLaunch(() async {
+      await _repository.deleteRole(role);
+      onResult(true, msg('भूमिका हटवली.', 'भूमिका हटाई गई।', 'Role deleted.'));
+    });
+  }
+
+  // ------------------------------------------------------ Subscription
+
+  /// Asks MultiSarv to activate [plan] for the society.
+  void requestSubscription(SubscriptionPlan plan, String note, {ResultCallback onResult = _noop}) {
+    final user = _currentUser;
+    if (!canRequestSubscription || user == null) {
+      onResult(
+        false,
+        msg(
+          'फक्त अध्यक्षच प्लॅनची विनंती करू शकतात.',
+          'केवल अध्यक्ष ही प्लान का अनुरोध कर सकते हैं।',
+          'Only the Chairman can request a plan.',
+        ),
+      );
+      return;
+    }
+    if (pendingSubscriptionRequest != null) {
+      onResult(
+        false,
+        msg(
+          'एक विनंती आधीच प्रलंबित आहे.',
+          'एक अनुरोध पहले से लंबित है।',
+          'A request is already waiting on MultiSarv.',
+        ),
+      );
+      return;
+    }
+    _safeLaunch(() async {
+      await _repository.insertSubscriptionRequest(
+        SubscriptionRequest(
+          planId: plan.id,
+          planName: plan.name,
+          requestedBy: user.ownerName.trim(),
+          requestedFlat: user.flatNumber,
+          contactNumber: user.contactNumber,
+          note: note,
+        ),
+      );
+      onResult(
+        true,
+        msg(
+          'विनंती पाठवली. MultiSarv टीम लवकरच संपर्क करेल.',
+          'अनुरोध भेजा गया। MultiSarv टीम जल्द संपर्क करेगी।',
+          'Request sent. The MultiSarv team will be in touch shortly.',
+        ),
+      );
     });
   }
 

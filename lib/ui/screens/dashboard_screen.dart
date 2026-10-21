@@ -12,6 +12,7 @@ import '../../util/format.dart';
 import '../components/common_components.dart';
 import '../components/dashboard_components.dart';
 import '../theme/app_colors.dart';
+import 'subscription_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -141,12 +142,16 @@ class DashboardScreen extends StatelessWidget {
           child: _WelcomeHero(
             greeting: langPick('नमस्कार', 'नमस्ते', _greetingFor(DateTime.now())),
             name: currentUser.ownerName,
-            detail: '${currentUser.flatNumber} • ${getRoleLabel(currentUser.role, language)}',
+            detail: '${currentUser.flatNumber} • ${memberRoleLabel(currentUser, language)}',
             dateLabel: DateFormat('EEEE, d MMMM', 'en_US').format(DateTime.now()),
             pendingLabel: langPick('थकबाकी', 'बकाया', 'Outstanding'),
             pendingAmount: dashboardBills.fold(0.0, (s, b) => s + b.pendingAmount),
           ),
         ),
+
+      // The society's SocietySarv plan, for the committee who pays for it.
+      if (viewModel.canViewSubscription)
+        const AnimatedSectionCard(delayMillis: 30, child: SubscriptionStatusCard()),
 
       // 1. Pinned Notices Banner (Animated)
       if (pinnedNotices.isNotEmpty)

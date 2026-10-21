@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 
-import 'data/models.dart';
 import 'l10n/app_strings.dart';
 import 'state/society_view_model.dart';
 import 'ui/components/common_components.dart';
@@ -101,7 +100,7 @@ class _AppShellState extends State<AppShell> {
             ),
             bottomNavigationBar: SocietyBottomNavigation(
               selectedTab: vm.selectedTab,
-              userRole: currentUser.role,
+              destinations: vm.destinations,
               language: language,
               onSelectTab: vm.selectTab,
             ),
@@ -194,24 +193,26 @@ class _AppShellState extends State<AppShell> {
 }
 
 /// The role decides the whole bar - Residents is the Chairman's, Security is
-/// the security team's, and nobody sees a tab they cannot open.
+/// the security team's, a society staff role shows the screens it was given,
+/// and nobody sees a tab they cannot open.
 class SocietyBottomNavigation extends StatelessWidget {
   const SocietyBottomNavigation({
     super.key,
     required this.selectedTab,
-    required this.userRole,
+    required this.destinations,
     required this.language,
     required this.onSelectTab,
   });
 
   final NavDestination selectedTab;
-  final UserRole userRole;
+
+  /// What the signed-in member may open ([SocietyViewModel.destinations]).
+  final List<NavDestination> destinations;
   final AppLanguage language;
   final ValueChanged<NavDestination> onSelectTab;
 
   @override
   Widget build(BuildContext context) {
-    final destinations = destinationsFor(userRole);
     // A tab the role cannot open (e.g. Gate reached from the dashboard) still
     // renders its screen, but no bar item is highlighted for it.
     final index = destinations.indexOf(selectedTab);

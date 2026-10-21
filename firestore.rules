@@ -25,6 +25,20 @@ service cloud.firestore {
       return request.resource.data.keys().hasAll(fields);
     }
 
+    // MultiSarv Core signs its admin panel in with a custom token carrying
+    // `panel: true` and the menus that admin was given (`*` for a super admin).
+    function panelMenu(menu) {
+      return request.auth != null
+        && request.auth.token.panel == true
+        && request.auth.token.menus is list
+        && ('*' in request.auth.token.menus || menu in request.auth.token.menus);
+    }
+
+    function knownRole(role) {
+      return role in ['CHAIRMAN', 'SECRETARY', 'TREASURER', 'COMMITTEE', 'RESIDENT', 'TENANT',
+                      'GUARD', 'HOUSEKEEPING', 'MAINTENANCE_STAFF', 'ACCOUNTANT', 'MANAGER'];
+    }
+
     // Every society is one document keyed by its login code, and all of its
     // records live in subcollections underneath it. Two societies can never
     // read or write each other's data because the paths do not overlap.
@@ -43,7 +57,10 @@ service cloud.firestore {
           && has(['flatNumber', 'ownerName', 'pin', 'role'])
           && request.resource.data.flatNumber is string
           && request.resource.data.ownerName is string
-          && request.resource.data.pin is string;
+          && request.resource.data.pin is string
+          && knownRole(request.resource.data.role)
+          && request.resource.data.get('customRoleId', '') is string
+          && request.resource.data.get('customRoleName', '') is string;
         allow delete: if allowed();
       }
 
@@ -106,6 +123,57 @@ service cloud.firestore {
         allow create, update: if allowed() && request.resource.data.value is int;
         allow delete: if allowed();
       }
+
+      // The society's own staff roles. Each builds on a built-in staff role
+      // and lists the screens (bottom-bar tabs) it opens.
+      match /roles/{roleId} {
+        allow read: if allowed();
+        allow create, update: if allowed()
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 60
+          && request.resource.data.baseRole in ['GUARD', 'HOUSEKEEPING', 'MAINTENANCE_STAFF', 'ACCOUNTANT', 'MANAGER']
+          && request.resource.data.menus is list
+          && request.resource.data.menus.hasOnly(['DASHBOARD', 'ACCOUNTS', 'MAINTENANCE', 'GATE', 'COMMUNITY'])
+          && request.resource.data.isActive is bool;
+        allow delete: if allowed();
+      }
+
+      // Audit trail of role changes - written once, never edited or removed.
+      match /role_history/{entryId} {
+        allow read: if allowed();
+        allow create: if allowed()
+          && has(['flatNumber', 'fromRole', 'toRole', 'changedBy', 'source'])
+          && knownRole(request.resource.data.fromRole)
+          && knownRole(request.resource.data.toRole)
+          && request.resource.data.source in ['app', 'core'];
+        allow update, delete: if false;
+      }
+
+      // The society's plan (`current`). Only MultiSarv Core may set it, so a
+      // society can never grant itself a subscription.
+      match /subscription/{docId} {
+        allow read: if allowed();
+        allow write: if panelMenu('subscriptions');
+      }
+
+      match /subscription_history/{entryId} {
+        allow read: if allowed();
+        allow create: if panelMenu('subscriptions');
+        allow update, delete: if false;
+      }
+
+      // The Chairman asks for a plan; MultiSarv Core closes the request.
+      match /subscription_requests/{requestId} {
+        allow read: if allowed();
+        allow create: if allowed()
+          && has(['planId', 'planName', 'requestedBy', 'status'])
+          && request.resource.data.planId is string
+          && request.resource.data.status == 'PENDING';
+        allow update: if panelMenu('subscriptions')
+          && request.resource.data.status in ['PENDING', 'DONE', 'REJECTED'];
+        allow delete: if false;
+      }
     }
 
     // Outgoing email, picked up by the Trigger Email extension. The app may
@@ -117,6 +185,19 @@ service cloud.firestore {
         && request.resource.data.to is list
         && request.resource.data.message.subject is string;
       allow update, delete: if false;
+    }
+
+    // SocietySarv plans, shared by every society. Read by the app, managed
+    // from MultiSarv Core only.
+    match /subscription_plans/{planId} {
+      allow read: if allowed();
+      allow create, update: if panelMenu('subscriptions')
+        && request.resource.data.name is string
+        && request.resource.data.price is number
+        && request.resource.data.durationMonths is int
+        && request.resource.data.features is list
+        && request.resource.data.isActive is bool;
+      allow delete: if panelMenu('subscriptions');
     }
 
     // ---- Everything else is denied ---------------------------------------

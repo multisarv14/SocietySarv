@@ -5,6 +5,7 @@
 // Members : the resident directory, and the only place a new resident is added
 // Parking : who holds which bay, and which bays are still free
 // Staff   : hiring, login credentials and access for society employees
+// Roles   : the society's own staff roles, and the history of role changes
 // ignore_for_file: constant_identifier_names
 
 import 'package:flutter/material.dart';
@@ -18,6 +19,7 @@ import '../../util/format.dart';
 import '../../util/image_blob.dart';
 import '../components/common_components.dart';
 import '../theme/app_colors.dart';
+import 'roles_screen.dart';
 
 class ResidentsScreen extends StatefulWidget {
   const ResidentsScreen({super.key});
@@ -27,7 +29,7 @@ class ResidentsScreen extends StatefulWidget {
 }
 
 class _ResidentsScreenState extends State<ResidentsScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 3, vsync: this)
+  late final TabController _tabs = TabController(length: 4, vsync: this)
     ..addListener(() {
       if (mounted) setState(() {});
     });
@@ -47,6 +49,7 @@ class _ResidentsScreenState extends State<ResidentsScreen> with SingleTickerProv
       tr('tab_members', language),
       tr('tab_parking', language),
       tr('tab_society_staff', language),
+      vm.msg('भूमिका', 'भूमिकाएं', 'Roles'),
     ];
     final selected = _tabs.index;
 
@@ -86,7 +89,8 @@ class _ResidentsScreenState extends State<ResidentsScreen> with SingleTickerProv
                 child: switch (selected) {
                   0 => const _MembersTab(),
                   1 => const _ParkingTab(),
-                  _ => const _SocietyStaffTab(),
+                  2 => const _SocietyStaffTab(),
+                  _ => const RolesTab(),
                 },
               ),
             ),
@@ -233,7 +237,7 @@ class _MembersTabState extends State<_MembersTab> {
           testTag: 'members_wing_filter',
         ),
       for (final member in visibleMembers)
-        _memberCard(context, member, theme, canDelete, language),
+        _memberCard(context, member, theme, canDelete, language, canChangeRole: vm.canManageRoles),
     ];
 
     return ListView.separated(
@@ -244,7 +248,8 @@ class _MembersTabState extends State<_MembersTab> {
     );
   }
 
-  Widget _memberCard(BuildContext context, Resident member, ThemeData theme, bool canDelete, AppLanguage language) {
+  Widget _memberCard(BuildContext context, Resident member, ThemeData theme, bool canDelete, AppLanguage language,
+      {bool canChangeRole = false}) {
     final isVacant = member.ownerName.trim().isEmpty;
     final small = theme.textTheme.bodySmall;
     final muted = theme.colorScheme.onSurfaceVariant;
@@ -291,6 +296,13 @@ class _MembersTabState extends State<_MembersTab> {
                       color: isVacant ? muted : theme.colorScheme.onSurface,
                     ),
                   ),
+                  // Committee posts are shown on the card; plain members are the default.
+                  if (!isVacant && member.role != UserRole.RESIDENT)
+                    Text(
+                      memberRoleLabel(member, language),
+                      key: Key('member_role_${member.flatNumber}'),
+                      style: small?.copyWith(color: AppColors.accentBlue, fontWeight: FontWeight.bold),
+                    ),
                   if (member.coApplicantName.trim().isNotEmpty)
                     Text('Co-applicant: ${member.coApplicantName}', style: small?.copyWith(color: muted)),
                   if (member.tenantName.trim().isNotEmpty)
@@ -318,6 +330,13 @@ class _MembersTabState extends State<_MembersTab> {
                 ],
               ),
             ),
+            if (canChangeRole && !isVacant)
+              IconButton(
+                key: Key('change_role_${member.flatNumber}'),
+                onPressed: () => showChangeRoleDialog(context, member),
+                tooltip: 'Change role',
+                icon: const Icon(Icons.manage_accounts, color: AppColors.tealPrimary),
+              ),
             IconButton(
               key: Key('edit_member_${member.flatNumber}'),
               onPressed: () => _openResidentDialog(context, member),
@@ -906,7 +925,7 @@ class _SocietyStaffTab extends StatelessWidget {
                     children: [
                       Text(member.ownerName, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
                       Text(
-                        getRoleLabel(member.role, language) +
+                        memberRoleLabel(member, language) +
                             (member.staffDesignation.trim().isNotEmpty ? ' • ${member.staffDesignation}' : ''),
                         style: theme.textTheme.bodySmall?.copyWith(color: AppColors.tealPrimary),
                       ),
@@ -959,6 +978,9 @@ class _StaffDialogState extends State<StaffDialog> {
   late final TextEditingController _staffCode = TextEditingController(text: widget.existing?.flatNumber ?? '');
   late final TextEditingController _name = TextEditingController(text: widget.existing?.ownerName ?? '');
   late UserRole _role = widget.existing?.role ?? UserRole.GUARD;
+
+  /// The society staff role picked, when one is (overrides [_role]).
+  late String _customRoleId = widget.existing?.customRoleId ?? '';
   late final TextEditingController _designation =
       TextEditingController(text: widget.existing?.staffDesignation ?? '');
   late final TextEditingController _phone = TextEditingController(text: widget.existing?.contactNumber ?? '');
@@ -986,6 +1008,12 @@ class _StaffDialogState extends State<StaffDialog> {
     final muted = theme.colorScheme.onSurfaceVariant;
     final pinText = _pin.text;
     final pinBad = pinText.isNotEmpty && pinText.length != 4;
+    // Society roles still on offer, plus the one this staff member already holds.
+    final offeredCustom = vm.roles.where((r) => r.isActive || r.docId == existing?.customRoleId).toList();
+    SocietyRole? picked;
+    for (final r in offeredCustom) {
+      if (r.docId == _customRoleId) picked = r;
+    }
 
     return AlertDialog(
       insetPadding: dialogInsetPadding(context),
@@ -1025,13 +1053,23 @@ class _StaffDialogState extends State<StaffDialog> {
               ),
               SearchableDropdownField(
                 label: 'Staff Role',
-                value: getRoleLabel(_role, language),
-                options: STAFF_ROLES.map((r) => getRoleLabel(r, language)).toList(),
-                onValueChange: (picked) => setState(() {
-                  _role = STAFF_ROLES.firstWhere(
-                    (r) => getRoleLabel(r, language) == picked,
-                    orElse: () => UserRole.GUARD,
-                  );
+                value: picked == null ? getRoleLabel(_role, language) : picked.name,
+                options: [
+                  ...STAFF_ROLES.map((r) => getRoleLabel(r, language)),
+                  ...offeredCustom.map((r) => r.name),
+                ],
+                onValueChange: (label) => setState(() {
+                  final custom = offeredCustom.where((r) => r.name == label);
+                  if (custom.isNotEmpty) {
+                    _customRoleId = custom.first.docId;
+                    _role = custom.first.baseRole;
+                  } else {
+                    _customRoleId = '';
+                    _role = STAFF_ROLES.firstWhere(
+                      (r) => getRoleLabel(r, language) == label,
+                      orElse: () => UserRole.GUARD,
+                    );
+                  }
                 }),
                 allowFreeText: false,
                 testTag: 'staff_role_dropdown',
@@ -1102,7 +1140,25 @@ class _StaffDialogState extends State<StaffDialog> {
                         'Access for this role',
                         style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.bold),
                       ),
-                      Text(_accessSummary(_role), style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+                      Text(
+                        picked == null
+                            ? _accessSummary(_role)
+                            : roleAccessSummary(
+                                destinationsForMember(
+                                  Resident(
+                                    flatNumber: '',
+                                    wing: '',
+                                    ownerName: '',
+                                    contactNumber: '',
+                                    role: picked.baseRole,
+                                    customRoleId: picked.docId,
+                                  ),
+                                  [picked],
+                                ),
+                                language,
+                              ),
+                        style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                      ),
                     ],
                   ),
                 ),
@@ -1147,6 +1203,7 @@ class _StaffDialogState extends State<StaffDialog> {
               pin: _pin.text,
               isActive: _isActive,
               existing: existing,
+              customRole: picked,
               onResult: (ok, message) {
                 if (ok) {
                   vm.showMessage(message);

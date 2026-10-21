@@ -658,6 +658,8 @@ class Resident {
     this.photoBase64 = '',
     this.staffDesignation = '',
     this.isActive = true,
+    this.customRoleId = '',
+    this.customRoleName = '',
   });
 
   final String docId;
@@ -709,6 +711,15 @@ class Resident {
   /// A staff member who has left keeps their record but cannot sign in.
   final bool isActive;
 
+  /// The society's own staff role (`roles/{id}`) this member holds, if any.
+  /// [role] then carries that custom role's base role.
+  final String customRoleId;
+
+  /// Name of [customRoleId], kept on the member so lists can show it unjoined.
+  final String customRoleName;
+
+  bool get hasCustomRole => customRoleId.trim().isNotEmpty;
+
   /// Staff sign in with their staff code; residents with their flat number.
   String get loginIdentifier => flatNumber;
 
@@ -743,6 +754,8 @@ class Resident {
     String? photoBase64,
     String? staffDesignation,
     bool? isActive,
+    String? customRoleId,
+    String? customRoleName,
   }) =>
       Resident(
         docId: docId ?? this.docId,
@@ -775,6 +788,8 @@ class Resident {
         photoBase64: photoBase64 ?? this.photoBase64,
         staffDesignation: staffDesignation ?? this.staffDesignation,
         isActive: isActive ?? this.isActive,
+        customRoleId: customRoleId ?? this.customRoleId,
+        customRoleName: customRoleName ?? this.customRoleName,
       );
 
   /// Applies what someone typed into their own profile form. When [addOnly] is
@@ -1244,4 +1259,299 @@ List<String> financialYears(SocietyInfo? society) {
     if (fy.isNotEmpty && !out.contains(fy)) out.add(fy);
   }
   return out;
+}
+
+// ------------------------------------------------------------ member roles
+
+/// Roles a member's own unit can hold: the committee, or plain membership.
+const List<UserRole> MEMBER_ROLES = [
+  UserRole.CHAIRMAN,
+  UserRole.SECRETARY,
+  UserRole.TREASURER,
+  UserRole.COMMITTEE,
+  UserRole.RESIDENT,
+  UserRole.TENANT,
+];
+
+/// Screens a society's own staff role can be given, by their persisted name.
+/// Residents (the register) stays the Chairman's alone, so it is not offered.
+const List<String> ROLE_MENU_KEYS = ['DASHBOARD', 'ACCOUNTS', 'MAINTENANCE', 'GATE', 'COMMUNITY'];
+
+/// A staff role a society made for itself -> `societies/{CODE}/roles/{id}`.
+///
+/// It builds on one of the built-in [STAFF_ROLES] ([baseRole]), which is what
+/// is written to a member's `role` so older app versions still treat them as
+/// staff. Which screens the role opens comes from [menus].
+class SocietyRole {
+  const SocietyRole({
+    this.docId = '',
+    required this.name,
+    this.description = '',
+    this.baseRole = UserRole.MANAGER,
+    this.menus = const ['COMMUNITY'],
+    this.isActive = true,
+  });
+
+  final String docId;
+  final String name;
+  final String description;
+  final UserRole baseRole;
+
+  /// Subset of [ROLE_MENU_KEYS].
+  final List<String> menus;
+
+  /// A retired role can no longer be handed out; holders keep their access.
+  final bool isActive;
+
+  SocietyRole copyWith({
+    String? docId,
+    String? name,
+    String? description,
+    UserRole? baseRole,
+    List<String>? menus,
+    bool? isActive,
+  }) =>
+      SocietyRole(
+        docId: docId ?? this.docId,
+        name: name ?? this.name,
+        description: description ?? this.description,
+        baseRole: baseRole ?? this.baseRole,
+        menus: menus ?? this.menus,
+        isActive: isActive ?? this.isActive,
+      );
+}
+
+/// Keeps only known screen keys, in the bottom bar's order, and never none.
+List<String> normaliseRoleMenus(Iterable<String> menus) {
+  final wanted = menus.map((m) => m.trim().toUpperCase()).toSet();
+  final out = ROLE_MENU_KEYS.where(wanted.contains).toList();
+  return out.isEmpty ? const ['COMMUNITY'] : out;
+}
+
+/// The custom role a member holds, or null when they hold a built-in one or
+/// their custom role has since been deleted.
+SocietyRole? customRoleOf(Resident member, List<SocietyRole> roles) {
+  if (!member.hasCustomRole) return null;
+  for (final r in roles) {
+    if (r.docId == member.customRoleId) return r;
+  }
+  return null;
+}
+
+/// One entry of the role audit trail -> `societies/{CODE}/role_history/{id}`.
+/// Written once and never edited.
+class RoleChange {
+  const RoleChange({
+    this.docId = '',
+    required this.flatNumber,
+    required this.memberName,
+    required this.fromRole,
+    required this.toRole,
+    this.fromCustomRoleName = '',
+    this.toCustomRoleName = '',
+    required this.changedBy,
+    this.source = 'app',
+    this.at,
+  });
+
+  final String docId;
+  final String flatNumber;
+  final String memberName;
+  final UserRole fromRole;
+  final UserRole toRole;
+  final String fromCustomRoleName;
+  final String toCustomRoleName;
+
+  /// "Name (flat)" in the app, the admin's email from MultiSarv Core.
+  final String changedBy;
+
+  /// `app` or `core`.
+  final String source;
+  final DateTime? at;
+}
+
+/// Why a role change is refused, so the screens can say it in every language.
+enum RoleChangeRefusal {
+  /// Only the Chairman manages roles in the app.
+  NOT_CHAIRMAN,
+
+  /// A staff record cannot become a unit's member or the other way round -
+  /// they are different records, and converting would duplicate a person.
+  WRONG_KIND,
+
+  /// A vacant unit has nobody to give a committee post to.
+  VACANT_UNIT,
+
+  /// The Chairman's post is only ever handed over, never simply removed.
+  CHAIRMAN_HANDOVER_ONLY,
+
+  /// The custom role picked has been retired or deleted.
+  ROLE_UNAVAILABLE,
+
+  /// Nothing would change.
+  UNCHANGED,
+}
+
+/// Checks a role change in the app before anything is written. [newRole] is a
+/// built-in role; [customRole] is set when a society staff role is picked.
+RoleChangeRefusal? checkRoleChange({
+  required Resident? actor,
+  required Resident target,
+  required UserRole newRole,
+  SocietyRole? customRole,
+}) {
+  if (actor?.role != UserRole.CHAIRMAN) return RoleChangeRefusal.NOT_CHAIRMAN;
+  final effective = customRole?.baseRole ?? newRole;
+  if (target.role.isStaff != effective.isStaff) return RoleChangeRefusal.WRONG_KIND;
+  if (customRole != null && (!customRole.isActive || customRole.docId.isEmpty)) {
+    return RoleChangeRefusal.ROLE_UNAVAILABLE;
+  }
+  if (!target.role.isStaff && target.ownerName.trim().isEmpty && effective != UserRole.RESIDENT) {
+    return RoleChangeRefusal.VACANT_UNIT;
+  }
+  // Becoming Chairman, or stopping being one, only happens through a handover.
+  if (target.role == UserRole.CHAIRMAN || effective == UserRole.CHAIRMAN) {
+    return RoleChangeRefusal.CHAIRMAN_HANDOVER_ONLY;
+  }
+  final sameCustom = (customRole?.docId ?? '') == target.customRoleId;
+  if (target.role == effective && sameCustom) return RoleChangeRefusal.UNCHANGED;
+  return null;
+}
+
+/// Checks a Chairman handover: [actor] gives the post to [target] and takes
+/// [actorNewRole] themselves.
+RoleChangeRefusal? checkChairmanHandover({
+  required Resident? actor,
+  required Resident target,
+  required UserRole actorNewRole,
+}) {
+  if (actor?.role != UserRole.CHAIRMAN) return RoleChangeRefusal.NOT_CHAIRMAN;
+  if (target.role.isStaff || !MEMBER_ROLES.contains(actorNewRole)) return RoleChangeRefusal.WRONG_KIND;
+  if (target.ownerName.trim().isEmpty) return RoleChangeRefusal.VACANT_UNIT;
+  if (actorNewRole == UserRole.CHAIRMAN) return RoleChangeRefusal.CHAIRMAN_HANDOVER_ONLY;
+  if (target.docId == actor!.docId && target.flatNumber == actor.flatNumber) return RoleChangeRefusal.UNCHANGED;
+  return null;
+}
+
+// ----------------------------------------------------- SocietySarv plans
+
+/// A plan MultiSarv sells to societies -> top-level `subscription_plans/{id}`.
+/// Managed centrally from MultiSarv Core; the app only reads it.
+class SubscriptionPlan {
+  const SubscriptionPlan({
+    required this.id,
+    required this.name,
+    this.description = '',
+    required this.price,
+    required this.durationMonths,
+    this.features = const [],
+    this.isActive = true,
+    this.sortOrder = 0,
+  });
+
+  final String id;
+  final String name;
+  final String description;
+
+  /// Price for the whole [durationMonths], in rupees.
+  final double price;
+  final int durationMonths;
+  final List<String> features;
+
+  /// Retired plans are not offered any more; societies on one keep it.
+  final bool isActive;
+  final int sortOrder;
+}
+
+enum SubscriptionStatus { ACTIVE, EXPIRING_SOON, EXPIRED, NONE }
+
+/// A plan that is still running but ends within this many days.
+const int SUBSCRIPTION_EXPIRY_WARNING_DAYS = 15;
+
+/// The society's current plan -> `societies/{CODE}/subscription/current`.
+///
+/// Only MultiSarv Core writes it. The plan's details are copied in when it is
+/// assigned, so a later edit of the plan does not rewrite what was sold.
+class SocietySubscription {
+  const SocietySubscription({
+    required this.planId,
+    required this.planName,
+    this.price = 0.0,
+    this.durationMonths = 0,
+    this.features = const [],
+    required this.startDate,
+    required this.expiryDate,
+    this.updatedBy = '',
+  });
+
+  final String planId;
+  final String planName;
+  final double price;
+  final int durationMonths;
+  final List<String> features;
+
+  /// `yyyy-MM-dd`.
+  final String startDate;
+
+  /// `yyyy-MM-dd`, the last day the plan covers.
+  final String expiryDate;
+  final String updatedBy;
+
+  DateTime? get expiry => DateTime.tryParse(expiryDate);
+}
+
+DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+/// Where a society stands on [today]. The expiry day itself is still covered.
+SubscriptionStatus subscriptionStatusOf(SocietySubscription? sub, DateTime today) {
+  final expiry = sub?.expiry;
+  if (sub == null || sub.planId.trim().isEmpty || expiry == null) return SubscriptionStatus.NONE;
+  final left = _dateOnly(expiry).difference(_dateOnly(today)).inDays;
+  if (left < 0) return SubscriptionStatus.EXPIRED;
+  if (left <= SUBSCRIPTION_EXPIRY_WARNING_DAYS) return SubscriptionStatus.EXPIRING_SOON;
+  return SubscriptionStatus.ACTIVE;
+}
+
+/// Days until the plan ends (0 on its last day, negative once lapsed).
+int subscriptionDaysLeft(SocietySubscription sub, DateTime today) {
+  final expiry = sub.expiry;
+  if (expiry == null) return 0;
+  return _dateOnly(expiry).difference(_dateOnly(today)).inDays;
+}
+
+/// The plans a society may pick from, cheapest-listed first.
+List<SubscriptionPlan> offeredPlans(List<SubscriptionPlan> plans) => plans.where((p) => p.isActive).toList()
+  ..sort((a, b) => a.sortOrder != b.sortOrder ? a.sortOrder.compareTo(b.sortOrder) : a.price.compareTo(b.price));
+
+enum SubscriptionRequestStatus { PENDING, DONE, REJECTED }
+
+/// A society asking MultiSarv to start, renew or change its plan ->
+/// `societies/{CODE}/subscription_requests/{id}`. Core activates the plan
+/// once paid and closes the request.
+class SubscriptionRequest {
+  const SubscriptionRequest({
+    this.docId = '',
+    required this.planId,
+    required this.planName,
+    required this.requestedBy,
+    this.requestedFlat = '',
+    this.contactNumber = '',
+    this.note = '',
+    this.status = SubscriptionRequestStatus.PENDING,
+    this.adminNote = '',
+    this.createdAt,
+  });
+
+  final String docId;
+  final String planId;
+  final String planName;
+  final String requestedBy;
+  final String requestedFlat;
+  final String contactNumber;
+  final String note;
+  final SubscriptionRequestStatus status;
+
+  /// What MultiSarv wrote back when closing it.
+  final String adminNote;
+  final DateTime? createdAt;
 }

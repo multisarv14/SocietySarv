@@ -56,6 +56,20 @@ class Collections {
   static const emergencyContacts = 'emergency_contacts';
   static const counters = 'counters';
 
+  /// Society staff roles and the audit trail of every role change.
+  static const roles = 'roles';
+  static const roleHistory = 'role_history';
+
+  /// `subscription/current` holds the society's plan (written by MultiSarv
+  /// Core only), alongside its history and the society's renewal requests.
+  static const subscription = 'subscription';
+  static const subscriptionCurrentDoc = 'current';
+  static const subscriptionHistory = 'subscription_history';
+  static const subscriptionRequests = 'subscription_requests';
+
+  /// Top-level plan catalogue, shared by every society.
+  static const subscriptionPlans = 'subscription_plans';
+
   /// Outgoing email, queued for the "Trigger Email from Firestore" worker.
   static const mail = 'mail';
 }

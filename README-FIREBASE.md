@@ -47,7 +47,9 @@ to a safe default when read.
 `pin` · `familyMemberCount:int` · `vehicleTwoWheelerCount:int` ·
 `vehicleFourWheelerCount:int` · `twoWheelerNumber` · `fourWheelerNumber` ·
 `parkingSlot` · `flatType` (`ONE_BHK|TWO_BHK|THREE_BHK|PENTHOUSE|COMMERCIAL_SHOP`) ·
-`squareFeet:int` · `balanceDue:double` · `isOwnerLiving:bool` · `photoBase64`
+`squareFeet:int` · `balanceDue:double` · `isOwnerLiving:bool` · `photoBase64` ·
+`customRoleId` · `customRoleName` (a society staff role from `roles`; `role` then
+holds that role's base staff role, so older app versions still treat them as staff)
 
 ### `maintenance_bills`
 `id:int` · `flatNumber` · `residentName` · `billMonth` · `baseAmount:double` ·
@@ -91,6 +93,35 @@ to a safe default when read.
 One doc per collection (`value:int`). A Firestore transaction increments it to
 hand out the next numeric `id`, keeping the auto-increment behaviour the UI
 relied on under Room.
+
+### `roles` — the society's own staff roles
+`name` · `description` · `baseRole` (`GUARD|HOUSEKEEPING|MAINTENANCE_STAFF|ACCOUNTANT|MANAGER`) ·
+`menus` (subset of `DASHBOARD|ACCOUNTS|MAINTENANCE|GATE|COMMUNITY` — the app tabs the role
+opens; actions inside a tab follow `baseRole`) · `isActive:bool`. Created by the Chairman
+(Residents → Roles) or from MultiSarv Core.
+
+### `role_history` — audit trail, create-only
+`flatNumber` · `memberName` · `fromRole` · `toRole` · `fromCustomRoleName` ·
+`toCustomRoleName` · `changedBy` · `source` (`app|core`) · `at:timestamp`.
+Every role change (and every Chairman handover, as two entries) is written in the
+same batch as the change itself.
+
+### `subscription/current` — the society's SocietySarv plan
+`planId` · `planName` · `price` · `durationMonths` · `features[]` · `startDate` ·
+`expiryDate` (`yyyy-MM-dd`, last covered day) · `updatedBy`. **Written by MultiSarv Core
+only** (rules check the panel token's `subscriptions` menu), so a society cannot grant
+itself a plan. Status is worked out from `expiryDate`: active, expiring soon (≤ 15 days),
+expired, or none. `subscription_history` keeps every assign / renew / change / cancel.
+
+### `subscription_requests`
+`planId` · `planName` · `requestedBy` · `requestedFlat` · `contactNumber` · `note` ·
+`status` (`PENDING|DONE|REJECTED`) · `adminNote` · `createdAt`. The Chairman creates them
+(always `PENDING`); MultiSarv Core closes them.
+
+### Top-level `subscription_plans/{planId}`
+`name` · `description` · `price` · `durationMonths:int` · `features[]` · `isActive:bool` ·
+`sortOrder:int`. One catalogue for every society, edited in MultiSarv Core
+(Society → Subscription → Plans). The app only reads it.
 
 ---
 

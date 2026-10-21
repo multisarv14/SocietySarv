@@ -136,7 +136,7 @@ class SocietyTopAppBar extends StatelessWidget implements PreferredSizeWidget {
                                 ),
                                 Text(
                                   user != null
-                                      ? '${user.flatNumber} • ${getRoleLabel(user.role, currentLanguage)}'
+                                      ? '${user.flatNumber} • ${memberRoleLabel(user, currentLanguage)}'
                                       : AppStrings.get('app_tagline', currentLanguage),
                                   style: textTheme.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.85)),
                                   maxLines: 1,
@@ -286,6 +286,13 @@ class MemberAvatar extends StatelessWidget {
     return GestureDetector(onTap: onTap, child: avatar);
   }
 }
+
+/// A member's role as people know it: the society's own staff role when they
+/// hold one, otherwise the built-in role.
+String memberRoleLabel(Resident member, AppLanguage language) =>
+    member.hasCustomRole && member.customRoleName.trim().isNotEmpty
+        ? member.customRoleName.trim()
+        : getRoleLabel(member.role, language);
 
 String getRoleLabel(UserRole role, AppLanguage language) {
   switch (role) {

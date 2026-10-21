@@ -20,6 +20,7 @@ import '../../util/image_blob.dart';
 import '../components/common_components.dart';
 import '../theme/app_colors.dart';
 import 'auth_screen.dart';
+import 'subscription_screen.dart';
 
 String _digitsOnly(String s, int max) {
   final d = s.replaceAll(RegExp(r'[^0-9]'), '');
@@ -119,6 +120,10 @@ class SocietyProfileDialog extends StatelessWidget {
                   ),
                 ],
               ),
+              if (vm.canViewSubscription) ...[
+                const SizedBox(height: 12),
+                const SubscriptionStatusCard(),
+              ],
               const Divider(height: 20),
               _ProfileRow('Registration No.', society.registrationNumber),
               _ProfileRow(
@@ -892,7 +897,7 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
     ].where((s) => s.trim().isEmpty).length;
     final hasSomethingToAdd = !isMemberProfile || missingFields > 0;
     bool locked(String existing) => isMemberProfile && existing.trim().isNotEmpty;
-    final roleLabel = getRoleLabel(currentUser.role, language);
+    final roleLabel = memberRoleLabel(currentUser, language);
 
     return AlertDialog(
       insetPadding: dialogInsetPadding(context),

@@ -195,6 +195,8 @@ Resident residentFromDoc(DocumentSnapshot doc) {
     photoBase64: _str(m, 'photoBase64'),
     staffDesignation: _str(m, 'staffDesignation'),
     isActive: _bool(m, 'isActive', true),
+    customRoleId: _str(m, 'customRoleId'),
+    customRoleName: _str(m, 'customRoleName'),
   );
 }
 
@@ -229,6 +231,8 @@ Json residentToMap(Resident r) => {
       'photoBase64': r.photoBase64,
       'staffDesignation': r.staffDesignation,
       'isActive': r.isActive,
+      'customRoleId': r.customRoleId,
+      'customRoleName': r.customRoleName,
     };
 
 // --------------------------------------------------------- maintenance bill
@@ -471,4 +475,120 @@ Json emergencyContactToMap(EmergencyContact c) => {
       'phoneNumber': c.phoneNumber,
       'category': c.category,
       'isActive': c.isActive,
+    };
+
+// -------------------------------------------------------------- roles
+
+DateTime? _time(Json m, String key) {
+  final v = m[key];
+  if (v is Timestamp) return v.toDate();
+  if (v is String) return DateTime.tryParse(v);
+  return null;
+}
+
+SocietyRole societyRoleFromDoc(DocumentSnapshot doc) {
+  final m = _data(doc);
+  return SocietyRole(
+    docId: doc.id,
+    name: _str(m, 'name'),
+    description: _str(m, 'description'),
+    baseRole: enumByName(UserRole.values, m['baseRole'] as String?, UserRole.MANAGER),
+    menus: normaliseRoleMenus(_strList(m, 'menus')),
+    isActive: _bool(m, 'isActive', true),
+  );
+}
+
+Json societyRoleToMap(SocietyRole r) => {
+      'name': r.name.trim(),
+      'description': r.description.trim(),
+      'baseRole': r.baseRole.name,
+      'menus': normaliseRoleMenus(r.menus),
+      'isActive': r.isActive,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+
+RoleChange roleChangeFromDoc(DocumentSnapshot doc) {
+  final m = _data(doc);
+  return RoleChange(
+    docId: doc.id,
+    flatNumber: _str(m, 'flatNumber'),
+    memberName: _str(m, 'memberName'),
+    fromRole: enumByName(UserRole.values, m['fromRole'] as String?, UserRole.RESIDENT),
+    toRole: enumByName(UserRole.values, m['toRole'] as String?, UserRole.RESIDENT),
+    fromCustomRoleName: _str(m, 'fromCustomRoleName'),
+    toCustomRoleName: _str(m, 'toCustomRoleName'),
+    changedBy: _str(m, 'changedBy'),
+    source: _str(m, 'source', 'app'),
+    at: _time(m, 'at'),
+  );
+}
+
+Json roleChangeToMap(RoleChange c) => {
+      'flatNumber': c.flatNumber,
+      'memberName': c.memberName,
+      'fromRole': c.fromRole.name,
+      'toRole': c.toRole.name,
+      'fromCustomRoleName': c.fromCustomRoleName,
+      'toCustomRoleName': c.toCustomRoleName,
+      'changedBy': c.changedBy,
+      'source': c.source,
+      'at': FieldValue.serverTimestamp(),
+    };
+
+// ------------------------------------------------------- subscriptions
+
+SubscriptionPlan subscriptionPlanFromDoc(DocumentSnapshot doc) {
+  final m = _data(doc);
+  return SubscriptionPlan(
+    id: doc.id,
+    name: _str(m, 'name', doc.id),
+    description: _str(m, 'description'),
+    price: _num(m, 'price'),
+    durationMonths: _int(m, 'durationMonths', 12),
+    features: _strList(m, 'features'),
+    isActive: _bool(m, 'isActive', true),
+    sortOrder: _int(m, 'sortOrder'),
+  );
+}
+
+SocietySubscription societySubscriptionFromDoc(DocumentSnapshot doc) {
+  final m = _data(doc);
+  return SocietySubscription(
+    planId: _str(m, 'planId'),
+    planName: _str(m, 'planName'),
+    price: _num(m, 'price'),
+    durationMonths: _int(m, 'durationMonths'),
+    features: _strList(m, 'features'),
+    startDate: _str(m, 'startDate'),
+    expiryDate: _str(m, 'expiryDate'),
+    updatedBy: _str(m, 'updatedBy'),
+  );
+}
+
+SubscriptionRequest subscriptionRequestFromDoc(DocumentSnapshot doc) {
+  final m = _data(doc);
+  return SubscriptionRequest(
+    docId: doc.id,
+    planId: _str(m, 'planId'),
+    planName: _str(m, 'planName'),
+    requestedBy: _str(m, 'requestedBy'),
+    requestedFlat: _str(m, 'requestedFlat'),
+    contactNumber: _str(m, 'contactNumber'),
+    note: _str(m, 'note'),
+    status: enumByName(SubscriptionRequestStatus.values, m['status'] as String?, SubscriptionRequestStatus.PENDING),
+    adminNote: _str(m, 'adminNote'),
+    createdAt: _time(m, 'createdAt'),
+  );
+}
+
+Json subscriptionRequestToMap(SubscriptionRequest r) => {
+      'planId': r.planId,
+      'planName': r.planName,
+      'requestedBy': r.requestedBy,
+      'requestedFlat': r.requestedFlat,
+      'contactNumber': r.contactNumber,
+      'note': r.note.trim(),
+      'status': SubscriptionRequestStatus.PENDING.name,
+      'adminNote': '',
+      'createdAt': FieldValue.serverTimestamp(),
     };

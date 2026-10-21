@@ -123,6 +123,29 @@ class SocietyRepository {
         emergencyContactFromDoc,
       );
 
+  Stream<List<SocietyRole>> watchRoles(String code) =>
+      _listen(_sub(code, Collections.roles).orderBy('name'), societyRoleFromDoc);
+
+  Stream<List<RoleChange>> watchRoleHistory(String code) =>
+      _listen(_sub(code, Collections.roleHistory).orderBy('at', descending: true).limit(100), roleChangeFromDoc);
+
+  /// The plan catalogue is shared by every society and edited in MultiSarv Core.
+  Stream<List<SubscriptionPlan>> watchSubscriptionPlans() =>
+      _listen(_db.collection(Collections.subscriptionPlans), subscriptionPlanFromDoc);
+
+  Stream<SocietySubscription?> watchSubscription(String code) => _sub(code, Collections.subscription)
+          .doc(Collections.subscriptionCurrentDoc)
+          .snapshots()
+          .map((s) => s.exists ? societySubscriptionFromDoc(s) : null)
+          .handleError((Object e) {
+        debugPrint('SocietyRepository: subscription listen failed: $e');
+      });
+
+  Stream<List<SubscriptionRequest>> watchSubscriptionRequests(String code) => _listen(
+        _sub(code, Collections.subscriptionRequests).orderBy('createdAt', descending: true).limit(20),
+        subscriptionRequestFromDoc,
+      );
+
   // ------------------------------------------------------- society lookup
 
   /// Looks a society up by its login code. Used by login and registration.
@@ -335,6 +358,93 @@ class SocietyRepository {
         debugPrint('unit counter bump failed: $e');
       }
     }
+  }
+
+  // ---------------------------------------------------------------- roles
+
+  DocumentReference<Map<String, dynamic>> _residentDoc(String code, Resident r) =>
+      _sub(code, Collections.residents).doc(r.docId.isEmpty ? r.flatNumber : r.docId);
+
+  /// Creates or updates a society staff role. Members already holding it are
+  /// brought in line in the same batch, so their name and base role never
+  /// drift from the role itself.
+  Future<void> saveRole(SocietyRole role, {List<Resident> holders = const []}) async {
+    final code = _activeSocietyCode;
+    if (code == null) return;
+    final roles = _sub(code, Collections.roles);
+    final ref = role.docId.isEmpty ? roles.doc() : roles.doc(role.docId);
+    final batch = _db.batch();
+    batch.set(
+        ref,
+        {
+          ...societyRoleToMap(role),
+          if (role.docId.isEmpty) 'createdAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true));
+    for (final member in holders) {
+      batch.update(_residentDoc(code, member), {'role': role.baseRole.name, 'customRoleName': role.name.trim()});
+    }
+    await batch.commit();
+  }
+
+  Future<void> deleteRole(SocietyRole role) async {
+    final roles = _active(Collections.roles);
+    if (roles == null || role.docId.isEmpty) return;
+    await roles.doc(role.docId).delete();
+  }
+
+  /// Gives one member a new role and records it in the audit trail, together.
+  /// Only the role fields are touched, so nothing else on the record is lost.
+  Future<void> changeMemberRole(Resident member, UserRole newRole, SocietyRole? customRole, RoleChange entry) async {
+    final code = _activeSocietyCode;
+    if (code == null) return;
+    final batch = _db.batch();
+    batch.update(_residentDoc(code, member), {
+      'role': newRole.name,
+      'customRoleId': customRole?.docId ?? '',
+      'customRoleName': customRole?.name.trim() ?? '',
+    });
+    batch.set(_sub(code, Collections.roleHistory).doc(), roleChangeToMap(entry));
+    await batch.commit();
+  }
+
+  /// Adds one entry to the audit trail on its own (a new hire, or a staff
+  /// record rewritten from the staff form).
+  Future<void> recordRoleChange(RoleChange entry) async {
+    final history = _active(Collections.roleHistory);
+    if (history == null) return;
+    await history.add(roleChangeToMap(entry));
+  }
+
+  /// Hands the Chairman's post from [from] to [to] in one write, so the
+  /// society is never left with no chairman or with two.
+  Future<void> handOverChairman({
+    required Resident from,
+    required UserRole fromNewRole,
+    required Resident to,
+    required RoleChange fromEntry,
+    required RoleChange toEntry,
+  }) async {
+    final code = _activeSocietyCode;
+    if (code == null) return;
+    final batch = _db.batch();
+    final cleared = {'customRoleId': '', 'customRoleName': ''};
+    batch.update(_residentDoc(code, to), {'role': UserRole.CHAIRMAN.name, ...cleared});
+    batch.update(_residentDoc(code, from), {'role': fromNewRole.name, ...cleared});
+    final history = _sub(code, Collections.roleHistory);
+    batch.set(history.doc(), roleChangeToMap(toEntry));
+    batch.set(history.doc(), roleChangeToMap(fromEntry));
+    await batch.commit();
+  }
+
+  // -------------------------------------------------------- subscription
+
+  /// Asks MultiSarv to start, renew or change the society's plan. The plan
+  /// itself is only ever switched on from MultiSarv Core.
+  Future<void> insertSubscriptionRequest(SubscriptionRequest request) async {
+    final requests = _active(Collections.subscriptionRequests);
+    if (requests == null) return;
+    await requests.add(subscriptionRequestToMap(request));
   }
 
   // ------------------------------------------------------ maintenance bills
